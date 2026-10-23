@@ -114,3 +114,17 @@ Zakładka **Kontakty** na dolnym pasku to własna książka adresowa każdej oso
 ## Stosy kart (etap 8)
 
 Zwinięte grupy wyglądają jak stos kart: główna karta z cienkimi warstwami wystającymi zza niej (2 wiadomości → 1 warstwa, 3 → 2, 4–5 → 3, 6+ → „gruby stos” z czterema warstwami, cieniem i znaczkiem ×N). Dotyk rozsuwa stos w miejscu (najnowsze pierwsze, 10 sztuk + „Pokaż więcej”), dotyk nagłówka zwija. W Spamie, Ofertach i Koszu grupuje sam adres nadawcy (bez okna czasu); w skrzynce, Wysłanych i Archiwum – rozmowy. Przesunięcie zwiniętego stosu działa na cały stos (z Cofnij), na karcie wewnątrz – na jedną wiadomość. Endpoint: `GET /api/messages/:id/stack?limit&before`.
+
+## Etap 8: lista bez przycisku, reguły, szablony, kopie, klucze dostępu
+
+- **Nieskończone wczytywanie:** lista dociąga starsze wiadomości sama, gdy dojdziesz do końca (także z serwera poczty). Gdy nie ma już nic starszego, nie ma też przycisku. Po usunięciu wiadomości dociągana jest kolejna, żeby lista została pełna.
+- **Reguły automatyczne** (Konto → Reguły automatyczne albo „Reguła dla nadawcy” w wiadomości): od nadawcy, z domeny lub z tematem zawierającym → archiwizuj, przeczytane, gwiazdka, Oferty, Spam, Kosz. Działają na nową pocztę od razu, opcjonalnie także na tę, która już jest.
+- **Szablony odpowiedzi:** własne gotowe teksty jako przyciski w oknie pisania. Podpis działa jak dotąd.
+- **Zaznaczanie wielu wiadomości:** ikona haczyka w górnym pasku → dotykaj wiadomości (stos zaznacza się w całości) → archiwizuj, usuń, przeczytane, gwiazdka, spam.
+- **Rozmowa gestem:** w wiadomości z rozmowy przesuń palcem w bok (albo strzałki ‹ ›) – poprzednia/następna wiadomość z tej rozmowy.
+- **Wyszukiwanie z podświetleniem** trafień w temacie i we fragmencie treści.
+- **Przeglądy (poranny, wieczorny):** przełącznik i dowolna godzina w Konto → Powiadomienia.
+- **Kopia zapasowa:** codziennie ok. 3:30 do `data/backups` (zostaje 7), ręczne tworzenie i pobieranie bazy oraz klucza szyfrowania w aplikacji. Przywracanie: zatrzymaj usługę, podmień `poczta.db` na pobraną kopię, wgraj `POCZTA_SECRET_KEY` do `/etc/poczta.env`.
+- **Aktualizacje automatyczne:** instalator dodaje timer `poczta-update.timer` (codziennie ok. 4:10): pobiera kod z GitHuba, instaluje, restartuje i w razie porażki wraca do poprzedniej wersji. Log: `/var/log/poczta-update.log`.
+- **Klucz dostępu (Face ID):** Konto → Logowanie kluczem dostępu, potem przycisk na ekranie logowania. Wymaga adresu HTTPS (jest). Logowanie kontem Google: ustaw `GOOGLE_CLIENT_ID` w `/etc/poczta.env` (klient OAuth typu „Web” z Google Cloud, z Twoją domeną jako dozwolonym źródłem); przycisk pojawi się na ekranie logowania, a wejść może tylko konto Google o adresie takim jak istniejący użytkownik Poczty.
+- **Widżet:** iOS nie daje aplikacjom z ekranu początkowego własnych widżetów, więc Poczta udostępnia prywatny odnośnik tylko do odczytu podsumowania (`/api/widget?token=…`) i gotowy skrypt dla darmowej aplikacji Scriptable.

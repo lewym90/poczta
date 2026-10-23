@@ -12,6 +12,7 @@ const P = {
   coin: '<rect class="f" x="3" y="6.500" width="18" height="11" rx="2.500"/><rect x="3" y="6.500" width="18" height="11" rx="2.500"/><circle cx="12" cy="12" r="2.500"/>',
   box: '<path class="f" d="M3.500 7.500 12 3l8.500 4.500v9L12 21l-8.500-4.500z"/><path d="M3.500 7.500 12 3l8.500 4.500v9L12 21l-8.500-4.500z"/><path d="M3.500 7.500 12 12l8.500-4.500M12 12v9"/>',
   spark: '<path class="f" d="M12 3.500 13.800 9l5.700 1.800-5.700 1.800L12 18l-1.800-5.400L4.500 10.800 10.200 9z"/><path d="M12 3.500 13.800 9l5.700 1.800-5.700 1.800L12 18l-1.800-5.400L4.500 10.800 10.200 9z"/>',
+  pen: '<path d="M4 20l4-1 11-11-3-3L5 16z"/>', copy: '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/>', archive: '<path d="M4 7h16v3H4zM6 10v9h12v-9M10 14h4"/>',
   chev: '<path d="m9.500 5.500 6.500 6.500-6.500 6.500"/>', down: '<path d="m6 9.500 6 6 6-6"/>', back: '<path d="m14.500 5.500-6.500 6.500 6.500 6.500"/>',
   send: '<path d="M4 12 20 4l-4 16-4.500-6.500z"/>', plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="m6 6 12 12M18 6 6 18"/>', check: '<path d="m5 12.500 4.500 4.500L19 7.500"/>',
   shield: '<path class="f" d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 8.500v4M12 15.600v.1"/>',
@@ -204,7 +205,7 @@ async function viewInbox() {
     ${bulkHtml(msgs)}<div class="list">${msgs.messages.length ? msgs.messages.map(stackRow).join('') : emptyFolderHtml()}</div>${moreHtml(msgs)}`;
   const found = pend.length && S.seg === 'msg' ? `<button class="found" data-seg="cases" style="--i:2" aria-label="Przejrzyj wykryte sprawy"><span class="spin"></span><span class="in"><span class="ico">${ic('spark', 'i18')}</span><span class="tx">Poczta znalazła ${ev ? `${ev} ${ev === 1 ? 'wydarzenie' : ev < 5 ? 'wydarzenia' : 'wydarzeń'}` : ''}${ev && dl ? ' i ' : ''}${dl ? `${dl} ${dl === 1 ? 'termin' : 'terminy'}` : ''}<small>Dodaj do Kalendarza jednym dotknięciem</small></span>${ic('chev', 'i14')}</span></button>` : '';
   paint(`${S.offline ? '<div class="off">Tryb offline · dane z pamięci</div>' : ''}
-    <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></div>
+    <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><span class="topr"><button class="round gl" data-x2="selmode" aria-label="Zaznacz wiadomości">${ic('check')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></span></div>
     ${S.accounts.length ? heroHtml(today) : ''}
     ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
     ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash', 'sent', 'drafts', 'archive', 'starred', 'other'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
@@ -400,9 +401,10 @@ async function viewMessage(id) {
     ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${rich(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
       : `<div class="body ${risky ? 'dim' : ''}" id="body">${rich(m.body)}</div>`}
     <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('send', 'i18')}Odpowiedz</button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">Odpowiedz wszystkim</button>` : ''}<button class="btn" data-cmp="forward">Przekaż dalej</button></div>
-    ${own || risky ? '' : `<div class="qrow">${QUICK.map((q) => `<button class="chip" data-qr="${esc(q)}">${esc(q)}</button>`).join('')}</div>`}
+    ${own || risky ? '' : `<div class="qrow">${QUICK.map((q) => `<button class="chip" data-qr="${esc(q)}">${esc(q)}</button>`).join('')}<button class="chip" data-x2="ar-from">${ic('tag', 'i14')}Reguła dla nadawcy</button></div>`}
     ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(toNames(String(t.to_addr || '').split(',')[0])) : esc(dispName(t.from_addr, t.from_name))} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
-  S.cur = { m, items };
+  S.cur = { m, items }; threadNav(m);
+  if (S.tnDir) { $('#view').animate([{ opacity: 0, transform: `translateX(${S.tnDir * 44}px)` }, { opacity: 1, transform: 'none' }], { duration: 300, easing: 'cubic-bezier(.22,1,.36,1)' }); S.tnDir = 0; }
   if (html) mountFrame(m.frame);
   else if (m.html_pending && (cacheGet('mode') || 'html') !== 'text') {
     let n = 0; const again = async () => { if (!location.hash.endsWith(`/m/${id}`) || n++ > 4) return; try { const r = await get(`/api/messages/${id}`); if (r.message.frame) return viewMessage(id); } catch {} setTimeout(again, 2500); }; setTimeout(again, 2000);
@@ -450,7 +452,10 @@ async function viewSearch() {
     if (!v) { $('#res').innerHTML = `<div class="empty"><div class="big ser">Wpisz coś</div>Szukam w tematach, nadawcach i treści, także bez polskich znaków.<br><span style="font-size:13px">Operatory: <b>od:</b>ola <b>do:</b>ola <b>ma:</b>załącznik <b>jest:</b>nieprzeczytane <b>w:</b>wysłane</span></div>`; return; }
     if (v.length < 2 && !/:/.test(v)) return;
     const r = await get('/api/search?q=' + encodeURIComponent(v)).catch(() => null); if (!r || my !== seq) return;
-    $('#res').innerHTML = (r.messages.length ? r.messages.map(msgRow).join('') : `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`)
+    const termsOf = r.terms || [], plainJs = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l');
+    const mark = (raw) => { const low = plainJs(raw); if (low.length !== raw.length || !termsOf.length) return esc(raw); const hot = new Array(raw.length).fill(false); for (const t of termsOf) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + 1)) for (let k = i; k < i + t.length; k++) hot[k] = true; let o = '', on = false; for (let k = 0; k < raw.length; k++) { if (hot[k] !== on) { o += on ? '</mark>' : '<mark>'; on = hot[k]; } o += esc(raw[k]); } return o + (on ? '</mark>' : ''); };
+    window.__sm = (m) => { let h = msgRow(m); h = h.replace(/(<div class="sj">)([\s\S]*?)(<\/div>)/, (x, p, inner, q) => p + mark(m.subject || '') + q); if (m.hit) h = h.replace(/(<div class="sj">[\s\S]*?<\/div>)/, (mm) => mm + `<div class="hit">${esc(m.hit).replace(/\u0001/g, '<mark>').replace(/\u0002/g, '</mark>')}</div>`); return h; };
+    $('#res').innerHTML = (r.messages.length ? r.messages.map(window.__sm).join('') : `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`)
       + (!saved.some((x) => x.query === v) ? `<button class="lnk" type="button" id="ssave" style="margin:12px 8px 0">+ Zapisz to wyszukiwanie</button>` : '');
   };
   q.oninput = () => { clearTimeout(t); t = setTimeout(run, 180); };
@@ -474,12 +479,17 @@ async function viewAccounts() {
   paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Konta i prywatność</span></div>
     ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-bell="${a.id}" data-on="${a.notify ? 1 : 0}" aria-pressed="${a.notify}" aria-label="Powiadomienia z ${esc(a.label)}" style="${a.notify ? '' : 'opacity:.55'}">${ic(a.notify ? 'bell' : 'bellOff', 'i18')}</button><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
     <div class="actions" style="margin-top:14px"><button class="btn pri grow" data-act="addacc">${ic('plus', 'i18')}Dodaj skrzynkę</button>${S.demoAllowed && !S.accounts.some((a) => a.provider === 'demo') ? '<button class="btn" data-act="demo">Tryb demo</button>' : ''}</div>
+    <div class="sec">Logowanie kluczem dostępu</div><div id="pkcard" class="card gl" style="margin-top:6px"></div>
+    <div class="sec">Reguły automatyczne</div><div id="arcard" class="card gl" style="margin-top:6px"></div>
+    <div class="sec">Szablony odpowiedzi</div><div id="tpcard" class="card gl" style="margin-top:6px"></div>
+    <div class="sec">Widżet</div><div id="wdcard" class="card gl" style="margin-top:6px"></div>
+    ${S.user.plan === 'owner' ? '<div class="sec">Kopia zapasowa</div><div id="bkcard" class="card gl" style="margin-top:6px"></div>' : ''}<div class="sec">Aktualizacje</div><div id="vercard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Porządek w poczcie</div><div id="orgcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
     <div class="sec">Podpis w wiadomościach</div><div class="card gl" style="margin-top:6px"><textarea class="in" id="sigtxt" rows="3" maxlength="600" placeholder="np. Pozdrawiam, Michał"></textarea><div class="actions"><button class="btn grow" data-act="savesig">Zapisz podpis</button></div></div>
     ${S.user.plan === 'owner' ? '<div class="sec">Osoby</div><div id="peoplecard" class="card gl" style="margin-top:6px"></div>' : ''}<div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
-  nav('accounts'); renderPushCard(); renderOrgCard(); renderPeople();
+  nav('accounts'); renderPushCard(); renderOrgCard(); renderPeople(); renderTools();
   get('/api/compose').then((r) => { S.sig = r.signature || ''; const t = $('#sigtxt'); if (t) t.value = S.sig; }).catch(() => {});
 }
 
@@ -510,7 +520,12 @@ function attHtml(m) {
 function viewAuth() {
   const jm = location.hash.match(/^#\/join\/([\w-]+)/), join = jm && jm[1], setup = !join && S.setupNeeded;
   paint(`<div class="auth"><h1 class="ser">${setup || join ? 'Witaj w <i>Poczcie</i>' : 'Poczta'}</h1><p style="color:var(--ink2);margin:0 0 18px;font-size:16px;line-height:23px">${join ? 'Dostałaś zaproszenie. Załóż własne konto: Twoja poczta będzie widoczna tylko dla Ciebie.' : setup ? 'Załóż konto właściciela. To hasło chroni dostęp do Twojej poczty.' : 'Zaloguj się, aby wejść do skrzynki.'}</p>
-  <form id="auth" class="gl" style="border-radius:28px;padding:8px 18px 18px"><div class="fld"><label for="e">E-mail</label><input class="in" id="e" type="email" autocomplete="username" required autocapitalize="off"></div><div class="fld"><label for="p">Hasło${setup || join ? ' (min. 10 znaków)' : ''}</label><input class="in" id="p" type="password" autocomplete="${setup || join ? 'new-password' : 'current-password'}" required minlength="${setup || join ? 10 : 1}"></div>${setup ? '<div class="fld"><label for="c">Kod instalacji</label><input class="in" id="c" autocomplete="off" placeholder="z instalatora serwera"></div>' : ''}<div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${setup || join ? 'Utwórz konto' : 'Zaloguj'}</button></form>${join ? '<p style="color:var(--ink2);font-size:13px;line-height:19px;margin:14px 6px 0">To hasło dotyczy tylko Poczty, nie Twojej skrzynki. Skrzynkę dodasz za chwilę.</p>' : ''}</div>`, { tabs: false });
+  <form id="auth" class="gl" style="border-radius:28px;padding:8px 18px 18px"><div class="fld"><label for="e">E-mail</label><input class="in" id="e" type="email" autocomplete="username" required autocapitalize="off"></div><div class="fld"><label for="p">Hasło${setup || join ? ' (min. 10 znaków)' : ''}</label><input class="in" id="p" type="password" autocomplete="${setup || join ? 'new-password' : 'current-password'}" required minlength="${setup || join ? 10 : 1}"></div>${setup ? '<div class="fld"><label for="c">Kod instalacji</label><input class="in" id="c" autocomplete="off" placeholder="z instalatora serwera"></div>' : ''}<div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${setup || join ? 'Utwórz konto' : 'Zaloguj'}</button></form>${join ? '<p style="color:var(--ink2);font-size:13px;line-height:19px;margin:14px 6px 0">To hasło dotyczy tylko Poczty, nie Twojej skrzynki. Skrzynkę dodasz za chwilę.</p>' : ''}${window.PublicKeyCredential && !setup && !join ? `<button type="button" class="btn" data-x2="pk-login" style="width:100%;margin-top:12px">${ic('shield', 'i18')}Zaloguj kluczem dostępu</button>` : ''}<div id="gbtn" style="margin-top:12px;display:flex;justify-content:center"></div></div>`, { tabs: false });
+  if (!setup && !join) get('/api/auth-config').then((c) => {
+    if (!c.google || !$('#gbtn')) return;
+    const go2 = () => { window.google.accounts.id.initialize({ client_id: c.google, callback: async (resp) => { try { const r = await post('/api/google/login', { credential: resp.credential }); S.user = r.user; S.animate = true; go('#/'); } catch (e) { const er = $('#err'); if (er) er.textContent = e.message; } } }); window.google.accounts.id.renderButton($('#gbtn'), { theme: 'filled_black', size: 'large', text: 'signin_with', width: 280 }); };
+    if (window.google?.accounts) go2(); else { const sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true; sc.onload = go2; document.head.appendChild(sc); }
+  }).catch(() => {});
   $('#auth').onsubmit = async (ev) => {
     ev.preventDefault(); const b = ev.submitter; b.disabled = true;
     try { const r = await post(join ? '/api/join' : setup ? '/api/setup' : '/api/login', { email: $('#e').value, password: $('#p').value, code: join || $('#c')?.value }); S.user = r.user; S.animate = true; go('#/'); }
@@ -573,7 +588,7 @@ async function renderPushCard() {
   const pr = await get('/api/push/prefs').catch(() => ({ mode: 'all', quiet: '' }));
   el.innerHTML = head + row(true) + `<div class="fld"><label for="pmode">Które wiadomości</label><select class="in" id="pmode"><option value="all"${pr.mode === 'all' ? ' selected' : ''}>Wszystkie nowe</option><option value="important"${pr.mode === 'important' ? ' selected' : ''}>Tylko z terminem, paczką lub płatnością</option></select></div>`
     + `<div class="fld"><label for="pquiet">Ciche godziny (bez powiadomień)</label><select class="in" id="pquiet">${QUIET.map(([v, t]) => `<option value="${v}"${pr.quiet === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
-    + `<div class="fld"><label for="pmorning">Poranny przegląd</label><select class="in" id="pmorning">${DIGEST_AM.map(([v, t]) => `<option value="${v}"${(pr.morning || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div><div class="fld"><label for="pevening">Wieczorny przegląd</label><select class="in" id="pevening">${DIGEST_PM.map(([v, t]) => `<option value="${v}"${(pr.evening || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
+    + [['morning', 'Poranny przegląd', '07:30'], ['evening', 'Wieczorny przegląd', '18:30']].map(([k, l, def]) => `<div class="kv" style="align-items:center"><span>${l}</span>${sw(!!pr[k], 'dg-' + k, l)}</div>${pr[k] ? `<div class="fld"><label for="p${k}">Godzina</label><input class="in" type="time" id="p${k}" value="${pr[k]}"></div>` : ''}`).join('')
     + `<div class="wh" style="line-height:21px;margin-top:8px">Przegląd to jedno powiadomienie z tym, co czeka: sprawy na dziś i płatności rano, plan na jutro wieczorem. Gdy nic nie czeka, nie przychodzi. Ustawienia dotyczą wszystkich Twoich urządzeń. Dzwonek przy skrzynce wycisza tylko tę skrzynkę.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button></div>`;
 }
 async function pushOn() {
@@ -651,7 +666,7 @@ async function composeSheet(opts = {}) {
     <div id="ccbox" ${cc || bcc0 ? '' : 'hidden'}>${rcptHtml('ccc', 'Dw')}${rcptHtml('cbc', 'UDW')}</div>
     ${cc || bcc0 ? '' : '<button class="lnk" type="button" id="showcc">Dw / UDW</button>'}
     <div class="fld"><label for="csu">Temat</label><input class="in" id="csu" value="${esc(subject)}"></div>
-    ${['reply', 'replyall', 'nudge'].includes(mode) ? `<div class="qrow" id="cqr">${QUICK.map((q) => `<button type="button" class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : ''}
+    <div class="qrow" id="ctp"></div>${['reply', 'replyall', 'nudge'].includes(mode) ? `<div class="qrow" id="cqr">${QUICK.map((q) => `<button type="button" class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" rows="9">${esc(text)}</textarea></div>
     <div class="cfiles" id="cfiles"></div>
     <div class="err" id="err" role="alert"></div>
@@ -662,7 +677,8 @@ async function composeSheet(opts = {}) {
     const paintFilesLater = () => paintFiles();
     const paintFiles = () => { $('#cfiles', sh).innerHTML = files.map((f, i) => `<span class="cfile gl">${ic('clip', 'i14')}<span>${esc(f.name)} · ${fmtSize(f.size)}</span><button type="button" data-rmf="${i}" aria-label="Usuń załącznik">${ic('x', 'i14')}</button></span>`).join(''); };
     if (files.length) paintFilesLater();
-    $('#cqr', sh)?.addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; const q = b.dataset.q; if (!ta.value.includes(q)) { const nl = ta.value.indexOf('\n'), p = ta.value.startsWith('\n') ? 0 : nl < 0 ? ta.value.length : nl; ta.value = ta.value.slice(0, p) + (p > 0 ? ' ' : '') + q + ta.value.slice(p); ta.dispatchEvent(new Event('input', { bubbles: true })); } ta.focus(); });
+    get('/api/templates').then((r) => { const el = $('#ctp', sh); if (el) el.innerHTML = r.templates.map((t) => `<button type="button" class="chip tp" data-q="${esc(t.body)}">${esc(t.name)}</button>`).join(''); }).catch(() => {});
+    [$('#cqr', sh), $('#ctp', sh)].forEach((qe) => qe?.addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; const q = b.dataset.q; if (!ta.value.includes(q)) { const nl = ta.value.indexOf('\n'), p = ta.value.startsWith('\n') ? 0 : nl < 0 ? ta.value.length : nl; ta.value = ta.value.slice(0, p) + (p > 0 ? ' ' : '') + q + ta.value.slice(p); ta.dispatchEvent(new Event('input', { bubbles: true })); } ta.focus(); }));
     $('#showcc', sh)?.addEventListener('click', (e) => { $('#ccbox', sh).hidden = false; e.currentTarget.remove(); $('#ccc', sh).focus(); });
     $('#cfiles', sh).addEventListener('click', (e) => { const b = e.target.closest('[data-rmf]'); if (b) { files.splice(+b.dataset.rmf, 1); paintFiles(); } });
     const readFile = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(f); });
@@ -1021,6 +1037,110 @@ function closeStack(st) {
   an.onfinish = fin;
 }
 
+// ---- etap 8: klucze dostępu, reguły, szablony, kopie, widżet, zaznaczanie, wątek gestem ----
+const b64uBuf = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); const bin = atob(s + '==='.slice((s.length + 3) % 4)); return Uint8Array.from(bin, (c) => c.charCodeAt(0)).buffer; };
+const bufB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function pkLogin() {
+  const o = await post('/api/passkey/login/options');
+  const c = await navigator.credentials.get({ publicKey: { challenge: b64uBuf(o.challenge), rpId: o.rpId, userVerification: o.userVerification, timeout: o.timeout } });
+  const r = await post('/api/passkey/login/verify', { id: c.id, response: { clientDataJSON: bufB64u(c.response.clientDataJSON), authenticatorData: bufB64u(c.response.authenticatorData), signature: bufB64u(c.response.signature) } });
+  S.user = r.user; S.animate = true; go('#/');
+}
+async function pkAdd() {
+  const o = await post('/api/passkey/register/options');
+  const c = await navigator.credentials.create({ publicKey: { challenge: b64uBuf(o.challenge), rp: o.rp, user: { id: b64uBuf(o.user.id), name: o.user.name, displayName: o.user.displayName }, pubKeyCredParams: o.pubKeyCredParams, authenticatorSelection: o.authenticatorSelection, timeout: o.timeout, attestation: 'none', excludeCredentials: o.excludeCredentials.map((e) => ({ type: 'public-key', id: b64uBuf(e.id) })) } });
+  await post('/api/passkey/register/verify', { name: /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : 'To urządzenie', response: { clientDataJSON: bufB64u(c.response.clientDataJSON), attestationObject: bufB64u(c.response.attestationObject) } });
+}
+const AR_ACT = { archive: 'Archiwizuj', read: 'Oznacz jako przeczytane', star: 'Oznacz gwiazdką', offers: 'Przenieś do Ofert', spam: 'Przenieś do Spamu', trash: 'Przenieś do Kosza' };
+const AR_FIELD = { from: 'od', domain: 'z domeny', subject: 'temat zawiera' };
+const fmtDay = (t) => { const d = new Date(t); return `${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+async function renderTools() {
+  const q = (id) => $(id);
+  const [ar, tp, pk, wd, ver] = await Promise.all([get('/api/auto-rules').catch(() => null), get('/api/templates').catch(() => null), get('/api/passkeys').catch(() => null), get('/api/widget/token').catch(() => null), get('/api/version').catch(() => null)]);
+  if (q('#arcard') && ar) q('#arcard').innerHTML = `<div class="wh" style="line-height:21px">Reguły działają na nową pocztę od razu po jej odebraniu.</div>${ar.rules.map((r) => `<div class="kv" style="align-items:center;gap:8px"><span style="min-width:0;word-break:break-word">${AR_FIELD[r.field]} <b>${esc(r.value)}</b> → ${AR_ACT[r.action]}<br><small class="mono" style="opacity:.6">użyta ${r.hits}×</small></span><button class="btn" data-x2="ar-del" data-id="${r.id}" aria-label="Usuń regułę">${ic('x', 'i18')}</button></div>`).join('')}<div class="actions"><button class="btn grow" data-x2="ar-new">${ic('plus', 'i18')}Nowa reguła</button></div>`;
+  if (q('#tpcard') && tp) { S.tpl = tp.templates; q('#tpcard').innerHTML = `<div class="wh" style="line-height:21px">Gotowe odpowiedzi pojawiają się jako przyciski w oknie pisania.</div>${tp.templates.map((t) => `<div class="kv" style="align-items:center;gap:8px"><span style="min-width:0"><b>${esc(t.name)}</b><br><small style="opacity:.65">${esc(t.body.slice(0, 70))}</small></span><span style="display:flex;gap:6px"><button class="btn" data-x2="tp-edit" data-id="${t.id}" aria-label="Edytuj">${ic('pen', 'i18')}</button><button class="btn" data-x2="tp-del" data-id="${t.id}" aria-label="Usuń">${ic('x', 'i18')}</button></span></div>`).join('')}<div class="actions"><button class="btn grow" data-x2="tp-edit" data-id="0">${ic('plus', 'i18')}Nowy szablon</button></div>`; }
+  if (q('#pkcard') && pk) q('#pkcard').innerHTML = `<div class="wh" style="line-height:21px">Klucz dostępu to logowanie Face ID lub Touch ID zamiast hasła. Hasło nadal działa.</div>${pk.keys.map((k) => `<div class="kv" style="align-items:center"><span>${esc(k.name || 'Klucz')} · ${fmtDay(k.created_at)}</span><button class="btn" data-x2="pk-del" data-id="${k.id}" aria-label="Usuń klucz">${ic('x', 'i18')}</button></div>`).join('')}${window.PublicKeyCredential ? `<div class="actions"><button class="btn grow" data-x2="pk-add">${ic('shield', 'i18')}Dodaj klucz dostępu</button></div>` : '<div class="wh">Ta przeglądarka nie obsługuje kluczy dostępu.</div>'}`;
+  if (q('#wdcard') && wd) {
+    const url = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}api/widget?token=${wd.token}`;
+    const script = `// Scriptable: widżet Poczty\nconst r = await new Request("${url}").loadJSON();\nconst w = new ListWidget(); w.backgroundColor = new Color("#0b1020");\nconst t = w.addText(r.open + " spraw · " + r.unread + " nowych"); t.textColor = Color.white(); t.font = Font.boldSystemFont(16);\nif (r.next) { const n = w.addText(r.next.title); n.textColor = new Color("#9aa7c2"); n.font = Font.systemFont(12); }\nif (r.due_week) { const p = w.addText("do zapłaty: " + r.due_week + " zł"); p.textColor = new Color("#ffc266"); p.font = Font.systemFont(12); }\nScript.setWidget(w); Script.complete();`;
+    S.wdScript = script;
+    q('#wdcard').innerHTML = `<div class="wh" style="line-height:21px">iOS nie pozwala aplikacjom z ekranu początkowego mieć własnych widżetów. Obejście: darmowa aplikacja Scriptable pokazuje widżet z Twoimi sprawami. Poczta daje do niego prywatny odnośnik tylko do odczytu podsumowania.</div>${wd.token ? `<div class="actions" style="flex-wrap:wrap"><button class="btn pri grow" data-x2="wd-copy">${ic('copy', 'i18')}Skopiuj skrypt widżetu</button><button class="btn" data-x2="wd-off">Wyłącz</button></div><div class="wh" style="margin-top:8px">Wklej skrypt w nowym skrypcie w Scriptable, potem dodaj widżet Scriptable na ekran i wybierz ten skrypt. Odnośnik z kluczem działa dla każdego, kto go ma, więc go nie udostępniaj.</div>` : `<div class="actions"><button class="btn pri grow" data-x2="wd-on">Włącz widżet</button></div>`}`;
+  }
+  if (q('#bkcard')) {
+    const bk = await get('/api/backup').catch(() => null);
+    if (bk) q('#bkcard').innerHTML = `<div class="wh" style="line-height:21px">Codziennie około 3:30 robię kopię bazy (zostaje 7 ostatnich). Kopia leży na serwerze, więc <b>pobierz ją od czasu do czasu</b> razem z kluczem szyfrowania. Bez klucza zapisane hasła skrzynek są nie do odczytania.</div>
+      <div class="kv"><span>Ostatnia kopia</span><span>${bk.files[0] ? fmtDay(bk.files[0].at) + ' · ' + fmtSize(bk.files[0].size) : 'jeszcze nie ma'}</span></div>
+      <div class="actions" style="flex-wrap:wrap"><button class="btn grow" data-x2="bk-run">${ic('refresh', 'i18')}Zrób kopię teraz</button>${bk.files[0] ? `<a class="btn grow" href="api/backup/file?name=${encodeURIComponent(bk.files[0].name)}" download>${ic('down', 'i18')}Pobierz kopię</a>` : ''}<a class="btn grow" href="api/backup/key" download>${ic('shield', 'i18')}Pobierz klucz</a></div>`;
+  }
+  if (q('#vercard') && ver) q('#vercard').innerHTML = `<div class="kv"><span>Wersja</span><span class="mono">${esc(ver.version)}</span></div><div class="wh" style="line-height:21px">${ver.auto ? 'Serwer sprawdza aktualizacje codziennie około 4:10, instaluje je i sam wraca do poprzedniej wersji, jeśli coś nie wystartuje. Aplikacja na telefonie odświeża się wtedy przy następnym otwarciu.' : 'To wersja deweloperska: aktualizacje automatyczne działają po instalacji na serwerze.'}</div>`;
+}
+function autoRuleSheet(pre = {}) {
+  const sh = sheet(`<h2>Nowa reguła</h2><form id="arf"><div class="fld"><label for="arfield">Gdy wiadomość jest</label><select class="in" id="arfield"><option value="from">od nadawcy</option><option value="domain">z domeny</option><option value="subject">z tematem zawierającym</option></select></div><div class="fld"><label for="arval">Wartość</label><input class="in" id="arval" autocapitalize="off" autocomplete="off" value="${esc(pre.value || '')}"></div><div class="fld"><label for="aract">Wtedy</label><select class="in" id="aract">${Object.entries(AR_ACT).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><label style="display:flex;gap:10px;align-items:center;margin:12px 0;font-size:14px"><input type="checkbox" id="arapply" checked> Zastosuj też do wiadomości, które już są w skrzynce</label><p id="err" style="color:var(--er);min-height:18px;margin:0 0 8px;font-size:13px"></p><button class="btn pri" type="submit" style="width:100%">Zapisz regułę</button></form>`);
+  if (pre.field) $('#arfield', sh).value = pre.field; if (pre.action) $('#aract', sh).value = pre.action;
+  $('#arf', sh).onsubmit = async (ev) => { ev.preventDefault(); try { const r = await post('/api/auto-rules', { field: $('#arfield', sh).value, value: $('#arval', sh).value, action: $('#aract', sh).value, apply: $('#arapply', sh).checked }); closeSheet(); toast(r.applied ? `Reguła zapisana, zastosowana do ${r.applied}` : 'Reguła zapisana'); if (/^#\/accounts/.test(location.hash)) renderTools(); else if (r.applied) route(); } catch (e) { $('#err', sh).textContent = e.message; } };
+}
+function templateSheet(id) {
+  const t = (S.tpl || []).find((x) => x.id === +id) || { name: '', body: '' };
+  const sh = sheet(`<h2>${t.id ? 'Edytuj szablon' : 'Nowy szablon'}</h2><form id="tpf"><div class="fld"><label for="tpn">Nazwa przycisku</label><input class="in" id="tpn" maxlength="40" value="${esc(t.name)}" placeholder="np. Wracam jutro"></div><div class="fld"><label for="tpb">Treść</label><textarea class="in" id="tpb" rows="5" maxlength="2000" placeholder="Dzień dobry, dziękuję za wiadomość. Odpowiem jutro.">${esc(t.body)}</textarea></div><p id="err" style="color:var(--er);min-height:18px;margin:0 0 8px;font-size:13px"></p><button class="btn pri" type="submit" style="width:100%">Zapisz</button></form>`);
+  $('#tpf', sh).onsubmit = async (ev) => { ev.preventDefault(); try { await post('/api/templates', { id: t.id || undefined, name: $('#tpn', sh).value, body: $('#tpb', sh).value }); closeSheet(); renderTools(); toast('Szablon zapisany'); } catch (e) { $('#err', sh).textContent = e.message; } };
+}
+// zaznaczanie wielu wiadomości
+function selMode(on) {
+  document.body.classList.toggle('selmode', on); $('#selbar')?.remove();
+  document.querySelectorAll('.row.picked').forEach((r) => r.classList.remove('picked'));
+  if (!on) return;
+  const bar = document.createElement('div'); bar.id = 'selbar'; bar.className = 'selbar gl';
+  bar.innerHTML = `<span class="mono" id="selc">0</span>${[['archive', 'archive', 'Archiwizuj'], ['delete', 'trash', 'Usuń'], ['read', 'check', 'Przeczytane'], ['star', 'star', 'Gwiazdka'], ['spam', 'ban', 'Spam']].map(([a, i, l]) => `<button type="button" data-x2="sel-act" data-a="${a}" aria-label="${l}">${ic(i, 'i18')}<small>${l}</small></button>`).join('')}<button type="button" data-x2="selmode" aria-label="Zakończ zaznaczanie">${ic('x', 'i18')}</button>`;
+  document.body.appendChild(bar);
+}
+function pickRow(row) { row.classList.toggle('picked'); const n = document.querySelectorAll('.list .row.picked').length; const c = $('#selc'); if (c) c.textContent = n; }
+async function selAct(a) {
+  const rows = [...document.querySelectorAll('.list .row.picked')]; if (!rows.length) { toast('Zaznacz wiadomości'); return; }
+  const th = rows.filter((r) => +r.dataset.tn > 1).map((r) => +r.dataset.open), one = rows.filter((r) => !(+r.dataset.tn > 1)).map((r) => +r.dataset.open);
+  const run = async (fn) => { const o = []; if (th.length) o.push(fn(th, true)); if (one.length) o.push(fn(one, false)); return Promise.all(o); };
+  try {
+    if (a === 'read' || a === 'star') { await run((ids, t) => actMsgs(ids, a, undefined, t)); toast(a === 'read' ? 'Oznaczono jako przeczytane' : 'Oznaczono gwiazdką'); selMode(false); route(); return; }
+    const res = await run((ids, t) => actMsgs(ids, a, undefined, t)); const all = res.flatMap((r) => r.ids || []);
+    selMode(false); rows.forEach((r) => (r.closest('.cstack') && r.matches('.cstack > .row') ? r.closest('.cstack') : r).remove());
+    toast(`${ORG_MSG[a] || 'Gotowe'} (${all.length})`, a === 'spam' || a === 'delete' || a === 'archive' ? { label: 'Cofnij', fn: async () => { await restoreMsgs(all, a); toast('Przywrócono'); route(); } } : null);
+    refreshCounts(); topUp();
+  } catch (e) { toast(e.message || 'Błąd'); }
+}
+// przełączanie wiadomości w rozmowie gestem w bok
+function threadNav(m) {
+  S.tn = null; if (!m.thread?.length) return;
+  const all = [...m.thread.map((t) => ({ id: t.id, date: t.date })), { id: m.id, date: m.date }].sort((a, b) => a.date - b.date), i = all.findIndex((x) => x.id === m.id);
+  S.tn = { all, i };
+  const nm = $('.meta .w .n'); if (nm) nm.insertAdjacentHTML('beforeend', `<span class="tnav mono"><button type="button" data-x2="tn" data-d="-1" ${i ? '' : 'disabled'} aria-label="Starsza w rozmowie">‹</button>${i + 1}/${all.length}<button type="button" data-x2="tn" data-d="1" ${i < all.length - 1 ? '' : 'disabled'} aria-label="Nowsza w rozmowie">›</button></span>`);
+}
+(() => {
+  const v = $('#view'); let x0 = 0, y0 = 0, t0 = 0, on = false;
+  v.addEventListener('touchstart', (e) => { if (!S.tn || !/^#\/m\//.test(location.hash) || e.touches.length !== 1) { on = false; return; } const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); on = x0 > 28 && x0 < innerWidth - 28; }, { passive: true });
+  v.addEventListener('touchend', (e) => {
+    if (!on) return; on = false; const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2 || Date.now() - t0 > 600) return;
+    const n = S.tn.all[S.tn.i + (dx < 0 ? 1 : -1)]; if (n) { S.tnDir = dx < 0 ? 1 : -1; go(`#/m/${n.id}`); }
+  }, { passive: true });
+})();
+async function x2(a, el) {
+  const d = el.dataset;
+  if (a === 'ar-new') autoRuleSheet();
+  else if (a === 'ar-from') { const m = S.cur.m; autoRuleSheet({ field: 'from', value: m.from_addr, action: 'archive' }); }
+  else if (a === 'ar-del') { await api('DELETE', `/api/auto-rules/${d.id}`); renderTools(); }
+  else if (a === 'tp-edit') templateSheet(d.id);
+  else if (a === 'tp-del') { await api('DELETE', `/api/templates/${d.id}`); renderTools(); }
+  else if (a === 'pk-add') { try { await pkAdd(); toast('Klucz dostępu dodany'); renderTools(); } catch (e) { toast(e.name === 'NotAllowedError' ? 'Anulowano' : e.message || 'Nie udało się'); } }
+  else if (a === 'pk-del') { await api('DELETE', `/api/passkeys/${d.id}`); renderTools(); }
+  else if (a === 'pk-login') { try { await pkLogin(); } catch (e) { const er = $('#err'); if (er) er.textContent = e.name === 'NotAllowedError' ? 'Anulowano' : e.message || 'Nie udało się zalogować'; } }
+  else if (a === 'wd-on') { await post('/api/widget/token', {}); renderTools(); }
+  else if (a === 'wd-off') { await post('/api/widget/token', { off: true }); renderTools(); }
+  else if (a === 'wd-copy') { try { await navigator.clipboard.writeText(S.wdScript); toast('Skopiowano skrypt'); } catch { toast('Nie udało się skopiować'); } }
+  else if (a === 'bk-run') { el.disabled = true; try { await post('/api/backup/run'); toast('Kopia gotowa'); } catch (e) { toast(e.message); } renderTools(); }
+  else if (a === 'selmode') selMode(!document.body.classList.contains('selmode'));
+  else if (a === 'sel-act') await selAct(d.a);
+  else if (a === 'tn') { const n = S.tn?.all[S.tn.i + +d.d]; if (n) { S.tnDir = +d.d; go(`#/m/${n.id}`); } }
+}
+
 // ---- nawigacja, zdarzenia ----
 function nav(cur) { document.querySelectorAll('.tab').forEach((t) => t.toggleAttribute('aria-current', false) || (t.dataset.tab === cur && t.setAttribute('aria-current', 'page'))); const bd = $('#bd-inbox'); bd.textContent = S.unread > 99 ? '99+' : S.unread; bd.hidden = !S.unread; }
 function badge() { try { S.unread ? navigator.setAppBadge?.(S.unread) : navigator.clearAppBadge?.(); } catch { /* brak wsparcia */ } }
@@ -1040,10 +1160,12 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck],[data-stk],[data-stkc],[data-stkmore]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck],[data-stk],[data-stkc],[data-stkmore],[data-x2]');
   if (!el) return; const d = el.dataset;
+  if (document.body.classList.contains('selmode') && !d.x2 && el.closest('.list') && (d.open || d.stk)) { pickRow(el.closest('.row') || el); return; }
   try {
-    if (d.stk) await toggleStack(el.closest('.cstack'));
+    if (d.x2) await x2(d.x2, el);
+    else if (d.stk) await toggleStack(el.closest('.cstack'));
     else if (d.stkc) closeStack(el.closest('.cstack'));
     else if (d.stkmore) await toggleStack(el.closest('.cstack'), true);
     else if (d.open) go(`#/m/${d.open}`);
@@ -1080,6 +1202,7 @@ document.addEventListener('click', async (ev) => {
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
     else if (d.mode) { try { localStorage.setItem('poczta.mode', JSON.stringify(d.mode)); } catch {} route(); }
     else if (d.act === 'showimg') { S.forceImg = +d.id; route(); }
+    else if (d.act?.startsWith('dg-')) { const k = d.act.slice(3), pr = await get('/api/push/prefs'); await post('/api/push/prefs', { [k]: pr[k] ? '' : k === 'morning' ? '07:30' : '18:30' }); renderPushCard(); }
     else if (d.act === 'imgtoggle') { await post('/api/organize', { images: !S.imgs }); renderOrgCard(); }
     else if (d.act === 'invite') { const r = await post('/api/invites', {}); renderPeople(new URL(`#/join/${r.code}`, location.href.split('#')[0]).href); }
     else if (d.sharelink) { if (navigator.share) { try { await navigator.share({ title: 'Poczta', text: 'Zaproszenie do Poczty:', url: d.sharelink }); } catch {} } else { await navigator.clipboard?.writeText(d.sharelink); toast('Link skopiowany'); } }

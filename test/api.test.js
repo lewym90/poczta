@@ -642,3 +642,17 @@ test('klucz dostępu: rejestracja i logowanie z symulowanym authenticatorem ES25
   assert.equal((await api('POST', '/api/passkey/login/verify', { id: u(credId), response: { clientDataJSON: u(cd2), authenticatorData: u(ad), signature: u(sig2) } })).status, 401); // powtórka wyzwania
   void saved; void cb; void sig;
 });
+
+test('zaznaczanie zbiorcze: przeczytane/nieprzeczytane, a wyszukiwarka zwraca fragment z oznaczonymi trafieniami', async () => {
+  const msgs = (await api('GET', '/api/messages?limit=100')).body.messages, ids = msgs.slice(0, 2).map((m) => m.id);
+  assert.equal((await api('POST', '/api/messages/act', { ids, action: 'unread' })).body.count, 2);
+  assert.equal((await api('GET', `/api/messages/${ids[0]}`)).status, 200);
+  const un = (await api('GET', '/api/messages?tab=unread&limit=100')).body.messages.map((m) => m.id); assert.ok(ids.every((i) => un.includes(i)));
+  await api('POST', '/api/messages/act', { ids, action: 'read' });
+  const s = (await api('GET', '/api/search?q=faktura')).body; assert.ok(s.terms.includes('faktura'));
+  const hit = s.messages.find((m) => m.hit); assert.ok(hit && /\u0001/.test(hit.hit) && /\u0002/.test(hit.hit));
+});
+test('lista zwraca znacznik more, gdy są starsze wiadomości', async () => {
+  const r = (await api('GET', '/api/messages?limit=2')).body; assert.equal(r.messages.length, 2); assert.equal(r.more, true);
+  assert.equal((await api('GET', '/api/messages?limit=100')).body.more, false);
+});

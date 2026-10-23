@@ -20,10 +20,11 @@ import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
+const GSI = process.env.GOOGLE_CLIENT_ID ? ' https://accounts.google.com/gsi/' : '';
 const HEADERS = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': `default-src 'self'; script-src 'self'${GSI}; style-src 'self' 'unsafe-inline'${GSI}; img-src 'self' data:; font-src 'self'; connect-src 'self'${GSI}; frame-src 'self'${GSI}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
 };
 
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
@@ -339,6 +340,15 @@ route('POST', '/api/messages/act', (ctx) => {
     }
     return { ok: true, ids: done, count: done.length };
   }
+  if (action === 'read' || action === 'unread') {
+    const rows = db.prepare(`SELECT id,uid,account_id,folder FROM messages WHERE user_id=? AND id IN (${ids.map(() => '?').join(',')})`).all(ctx.user.id, ...ids.map(Number));
+    for (const r of rows) {
+      db.prepare('UPDATE messages SET unread=? WHERE id=?').run(action === 'read' ? 0 : 1, r.id);
+      const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(r.account_id);
+      if (acc && acc.provider === 'imap') providers.imap.setSeen({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), r.uid, action === 'read', folderPath(r.account_id, r.folder)).catch(() => {});
+    }
+    return { ok: true, ids: rows.map((r) => r.id), count: rows.length };
+  }
   let done; try { done = mark(ctx.user.id, ids, action, ctx.body.scope === 'domain' ? 'domain' : 'sender'); } catch (e) { bad(e.message); }
   return { ok: true, ids: done, count: done.length };
 });
@@ -461,7 +471,20 @@ route('GET', '/api/search', (ctx) => {
   const rows = fq
     ? db.prepare(`SELECT ${MSG_COLS} FROM messages_fts f JOIN messages m ON m.id=f.rowid WHERE messages_fts MATCH ? AND ${where.join(' AND ')} ORDER BY m.date DESC LIMIT 40`).all(fq, ...args)
     : db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY m.date DESC LIMIT 40`).all(...args);
-  return { messages: withItems(ctx.user.id, rows) };
+  const terms = (plain(text).match(/[a-z0-9]{2,}/g) || []).slice(0, 8);
+  const msgs = withItems(ctx.user.id, rows);
+  if (terms.length && msgs.length) {
+    const bodies = new Map(db.prepare(`SELECT id,body FROM messages WHERE user_id=? AND id IN (${msgs.map(() => '?').join(',')})`).all(ctx.user.id, ...msgs.map((m) => m.id)).map((r) => [r.id, r.body || '']));
+    for (const m of msgs) {
+      const body = bodies.get(m.id).replace(/\s+/g, ' '), low = plain(body);
+      let at = -1; for (const t of terms) { const i = low.indexOf(t); if (i >= 0 && (at < 0 || i < at)) at = i; }
+      if (at >= 0 && low.length === body.length) { const from = Math.max(0, at - 50); const to = at + 110, seg = body.slice(from, to), ls = low.slice(from, to), hot = new Array(seg.length).fill(false);
+        for (const t of terms) for (let i = ls.indexOf(t); i >= 0; i = ls.indexOf(t, i + 1)) for (let k = i; k < i + t.length; k++) hot[k] = true;
+        let out = '', on = false; for (let k = 0; k < seg.length; k++) { if (hot[k] !== on) { out += on ? '\u0002' : '\u0001'; on = hot[k]; } out += seg[k]; } if (on) out += '\u0002';
+        m.hit = (from ? '…' : '') + out + (to < body.length ? '…' : ''); }
+    }
+  }
+  return { messages: msgs, terms };
 });
 // treść załącznika: zapisana lokalnie (małe obrazki inline) albo pobrana z serwera poczty
 async function attBuffer(m, a) {

@@ -306,3 +306,20 @@ html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
 .morew{min-height:46px;align-items:center}
 .morew .spin{width:20px;height:20px;border-radius:50%;border:2px solid rgba(255,255,255,.18);border-top-color:var(--acc2);animation:spn .8s linear infinite}
 @keyframes spn{to{transform:rotate(360deg)}}
+
+/* etap 8 */
+.topr{display:flex;gap:8px}
+mark{background:rgba(255,194,102,.28);color:inherit;border-radius:4px;padding:0 2px}
+.hit{margin-top:4px;font-size:13px;line-height:18px;color:var(--ink2)}
+.chip.tp{border-style:dashed}
+.tnav{display:inline-flex;align-items:center;gap:2px;margin-left:10px;font-size:11px;color:var(--ink2);vertical-align:2px}
+.tnav button{width:30px;height:30px;font-size:20px;line-height:1;border-radius:15px;color:var(--ink)}
+.tnav button:disabled{opacity:.25}
+.selmode .list .row.gl,.selmode .list .row.gl.picked{padding-left:46px;background-repeat:no-repeat}
+.selmode .list .row.gl{background-image:radial-gradient(circle at 23px 50%,transparent 8px,rgba(255,255,255,.4) 8.5px,rgba(255,255,255,.4) 10px,transparent 10.5px)}
+.selmode .list .row.gl.picked{background-image:radial-gradient(circle at 23px 50%,var(--acc2) 0,var(--acc2) 10px,transparent 10.5px);border-color:var(--acc2)}
+.selbar{position:fixed;left:12px;right:12px;bottom:calc(var(--sab,0px) + 96px);z-index:30;display:flex;align-items:center;justify-content:space-between;gap:2px;padding:8px 10px;border-radius:22px;animation:rise .35s cubic-bezier(.2,.8,.2,1) both}
+.selbar #selc{min-width:26px;font-size:14px;color:var(--acc2)}
+.selbar button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 7px;color:var(--ink);background:none;border:0;font:inherit}
+.selbar small{font-size:10px;color:var(--ink2)}
+.selmode #fab{display:none}

@@ -88,6 +88,11 @@ route('POST', '/api/login', async (ctx) => {
 route('POST', '/api/logout', (ctx) => { destroySession(ctx.token); ctx.headers['Set-Cookie'] = sessionCookie('', 0); return { ok: true }; });
 
 // konta
+// Jednorazowo usuwa z już zapisanych wiadomości znaczniki "[image: ...]" z podglądów i treści.
+for (const r of db.prepare("SELECT id,snippet,body FROM messages WHERE snippet LIKE '%[image:%' OR body LIKE '%[image:%'").all()) {
+  const clean = (t) => String(t || '').replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/ {2,}/g, ' ');
+  db.prepare('UPDATE messages SET snippet=?, body=? WHERE id=?').run(clean(r.snippet).trim(), clean(r.body), r.id);
+}
 const publicAcc = (a) => ({ id: a.id, label: a.label, provider: a.provider, email: a.email, live: watching(a.id), notify: !!a.notify, status: a.status, last_sync: a.last_sync, last_error: a.last_error, count: db.prepare('SELECT COUNT(*) n FROM messages WHERE account_id=?').get(a.id).n });
 route('GET', '/api/accounts', (ctx) => ({ accounts: db.prepare('SELECT * FROM accounts WHERE user_id=? ORDER BY id').all(ctx.user.id).map(publicAcc) }));
 route('GET', '/api/presets', (ctx) => { const p = presetFor(ctx.query.get('email') || ''); return { preset: p ? { name: p.name, note: p.note } : null }; });

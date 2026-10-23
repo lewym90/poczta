@@ -22,7 +22,7 @@ async function normalize(msg) {
   const p = await simpleParser(msg.source, { skipImageLinks: true });
   const ics = [];
   for (const a of p.attachments || []) if (/calendar/i.test(a.contentType) || /\.ics$/i.test(a.filename || '')) ics.push(a.content.toString('utf8'));
-  const body = (p.text || htmlToText(p.html || '')).replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
+  const body = (p.text || htmlToText(p.html || '')).replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
   const from = p.from?.value?.[0] || {};
   return {
     uid: msg.uid, messageId: p.messageId || null,

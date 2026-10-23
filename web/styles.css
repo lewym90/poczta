@@ -303,3 +303,6 @@ html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
 /* wydajność listy: bez rozmycia tła i ciężkich cieni na każdym wierszu */
 .list .row.gl,.stkh.gl{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(22,28,44,.86);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 4px 12px rgba(0,0,0,.28)}
 .list .row{contain:layout style}
+.morew{min-height:46px;align-items:center}
+.morew .spin{width:20px;height:20px;border-radius:50%;border:2px solid rgba(255,255,255,.18);border-top-color:var(--acc2);animation:spn .8s linear infinite}
+@keyframes spn{to{transform:rotate(360deg)}}

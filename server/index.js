@@ -9,6 +9,7 @@ import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, dest
 import { openFolder, loadOlder, folderPath, syncFolders, providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
 import { moveTo, star, mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
 import { serverDeleteOn } from './jobs.js';
+import { registerExtras, dailyBackup } from './extras.js';
 import { assertPublicHost } from './security.js';
 import zlib from 'node:zlib';
 import { cleanHtml, frameDoc } from './intel/mailhtml.js';
@@ -100,6 +101,7 @@ function login(ctx, id, email, plan = 'owner') {
   ctx.headers['Set-Cookie'] = sessionCookie(token, 60 * 86400);
   return { user: { id, email, plan } };
 }
+registerExtras({ route, bad, login, rateLimit, isEmail });
 route('POST', '/api/login', async (ctx) => {
   if (!rateLimit(`login:${ctx.ip}`, 8)) bad('Za dużo prób. Spróbuj za kilka minut.', 429);
   const { email, password } = ctx.body;
@@ -224,10 +226,10 @@ route('GET', '/api/messages', (ctx) => {
   else if (!['action', 'dates', 'other', 'snoozed', 'starred'].includes(tab)) where.push(`(m.thread_key IS NULL OR m.thread_key='' OR NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND t.thread_key=m.thread_key AND t.cat=m.cat AND (t.date>m.date OR (t.date=m.date AND t.id>m.id))${tab === 'unread' ? ' AND t.unread=1' : ''}))`);
   if (tab === 'action') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status='new')");
   if (tab === 'dates') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status IN ('new','added'))");
-  const rows = db.prepare(`SELECT ${MSG_COLS_T} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit);
+  const rows = db.prepare(`SELECT ${MSG_COLS_T} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit + 1), more = rows.length > limit; rows.length = Math.min(rows.length, limit);
   const total = db.prepare("SELECT SUM(unread) u FROM messages WHERE user_id=? AND cat='inbox' AND (snoozed_until IS NULL OR snoozed_until<=?)").get(uid, now);
   const cn = counts(uid);
-  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed: cn.snoozed, counts: cn, outbox: db.prepare("SELECT COUNT(*) n FROM outbox WHERE user_id=? AND ((state='queued' AND send_at>?) OR state='failed')").get(uid, now + 15000).n };
+  return { messages: withItems(uid, rows), more, unread: total.u || 0, snoozed: cn.snoozed, counts: cn, outbox: db.prepare("SELECT COUNT(*) n FROM outbox WHERE user_id=? AND ((state='queued' AND send_at>?) OR state='failed')").get(uid, now + 15000).n };
 });
 const imagesOn = (uid) => (db.prepare("SELECT value FROM flags WHERE user_id=? AND key='images'").get(uid)?.value ?? '1') === '1';
 // członkowie stosu: rozmowa (skrzynka, wysłane, archiwum) albo wszystko od jednego nadawcy (Spam, Oferty, Kosz), od najnowszej
@@ -755,6 +757,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startScheduler();
   db.prepare("UPDATE outbox SET state='failed', error='Przerwano przez restart serwera. Sprawdź folder Wysłane.' WHERE state='sending'").run();
   setInterval(() => flushOutbox().catch(() => {}), 3000).unref();
+  setInterval(() => { try { dailyBackup(); } catch (e) { console.error('Kopia zapasowa:', e.message); } }, 600000).unref();
   const stop = () => { server.close(); db.close(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }

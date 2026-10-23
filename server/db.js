@@ -109,6 +109,16 @@ const MIGRATIONS = [
    CREATE TABLE saved_searches(
      id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      name TEXT NOT NULL, query TEXT NOT NULL, created_at INTEGER NOT NULL);`,
+  `CREATE TABLE auto_rules(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     field TEXT NOT NULL, value TEXT NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL, hits INTEGER NOT NULL DEFAULT 0,
+     UNIQUE(user_id, field, value));
+   CREATE TABLE templates(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
+   CREATE TABLE passkeys(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     cred_id TEXT NOT NULL UNIQUE, pub TEXT NOT NULL, counter INTEGER NOT NULL DEFAULT 0, name TEXT, created_at INTEGER NOT NULL);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

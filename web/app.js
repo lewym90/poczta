@@ -209,7 +209,7 @@ async function viewInbox() {
     ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
     ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash', 'sent', 'drafts', 'archive', 'starred', 'other'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
   nav('inbox');
-  S.oldest = msgs.messages.length ? Math.min(...msgs.messages.map((m) => m.date)) : 0;
+  S.oldest = msgs.messages.length ? Math.min(...msgs.messages.map((m) => m.date)) : 0; watchMore();
   // wiadomości na górze listy pobieramy z góry, więc otwierają się natychmiast
   S.pre ||= new Map();
   (async () => { for (const m of msgs.messages.slice(0, 8)) { if (S.pre.has(m.id) || !location.hash.match(/^#\/?$/)) continue; try { S.pre.set(m.id, { t: Date.now(), r: await get(`/api/messages/${m.id}`) }); } catch {} } })();
@@ -217,21 +217,39 @@ async function viewInbox() {
 }
 
 const FOLDER_NAME = { offers: 'Oferty', spam: 'Spam', trash: 'Kosz', sent: 'Wysłane', drafts: 'Szkice', archive: 'Archiwum', starred: 'Oznaczone', other: 'Folder' };
+const histKey = () => `${S.filter}|${S.account || 0}`;
+const histPossible = () => ['all', 'unread', 'offers', 'spam'].includes(S.filter) && !(S.histDone || {})[histKey()];
 function moreHtml(m) {
-  if (!m.messages.length || S.filter === 'snoozed') return '';
-  return `<div class="morew" id="morew"><button class="btn" data-act="more">${ic('down', 'i18')}Wczytaj starsze</button></div>`;
+  S.more = !!m.more;
+  if (!m.messages.length || S.filter === 'snoozed' || (!S.more && !histPossible())) return '';
+  return '<div class="morew" id="morew" aria-hidden="true"></div>';
 }
-async function loadMore(btn) {
-  const list = $('.list'); if (!list) return; btn.disabled = true; btn.lastChild.textContent = 'Wczytuję…';
-  const q = new URLSearchParams({ tab: S.seg === 'msg' ? S.filter : 'all', limit: '60' }); if (S.account) q.set('account', S.account);
-  if (S.filter === 'other' && S.otherFolder) { q.set('folder', S.otherFolder.key); q.set('account', S.otherFolder.acc); }
-  const fetchPage = async (before) => { const p = new URLSearchParams(q); if (before) p.set('before', before); return get('/api/messages?' + p); };
-  let r = await fetchPage(S.oldest);
-  if (!r.messages.length && ['all', 'unread', 'offers', 'spam'].includes(S.filter)) { const h = await post('/api/history', { account_id: S.account || 0 }); if (h.added) r = await fetchPage(S.oldest); else if (!h.left) { toast('To wszystkie wiadomości'); btn.parentElement.remove(); return; } }
-  if (!r.messages.length) { toast('To wszystkie wiadomości'); btn.parentElement.remove(); return; }
-  list.insertAdjacentHTML('beforeend', r.messages.map((m, i) => stackRow(m, i)).join(''));
-  S.oldest = Math.min(...r.messages.map((m) => m.date)); btn.disabled = false; btn.lastChild.textContent = 'Wczytaj starsze';
+let moreObs = null;
+function watchMore() {
+  moreObs?.disconnect(); moreObs = null; const el = $('#morew'); if (!el || !('IntersectionObserver' in window)) return;
+  moreObs = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) loadMore(); }, { rootMargin: '500px 0px' }); moreObs.observe(el);
 }
+async function loadMore() {
+  const list = $('.list'), w = $('#morew'); if (!list || !w || S.loading) return; S.loading = true; w.innerHTML = '<span class="spin"></span>';
+  try {
+    const q = new URLSearchParams({ tab: S.seg === 'msg' ? S.filter : 'all', limit: '60' }); if (S.account) q.set('account', S.account);
+    if (S.filter === 'other' && S.otherFolder) { q.set('folder', S.otherFolder.key); q.set('account', S.otherFolder.acc); }
+    const fetchPage = (before) => { const p = new URLSearchParams(q); if (before) p.set('before', before); return get('/api/messages?' + p); };
+    let r = await fetchPage(S.oldest);
+    if (!r.messages.length && histPossible()) {
+      const h = await post('/api/history', { account_id: S.account || 0 });
+      if (h.added) r = await fetchPage(S.oldest); else (S.histDone ||= {})[histKey()] = 1;
+    }
+    if (r.messages.length) {
+      list.insertAdjacentHTML('beforeend', r.messages.map((m, i) => stackRow(m, i)).join(''));
+      S.oldest = Math.min(...r.messages.map((m) => m.date)); S.more = !!r.more;
+    } else S.more = false;
+    if (!S.more && !histPossible()) { moreObs?.disconnect(); w.remove(); } else w.innerHTML = '';
+  } catch { w.innerHTML = ''; } finally { S.loading = false; }
+}
+// po usunięciu wiadomości dociągamy kolejną starszą, żeby lista dalej była pełna
+let topT = 0;
+function topUp() { clearTimeout(topT); topT = setTimeout(() => { if (S.loading || !$('#morew')) return; if (document.querySelectorAll('.list > .row, .list > .cstack').length < 60) loadMore(); }, 500); }
 function chipsHtml(c = {}) {
   const k = (id, l, n, cls = '') => `<button class="chip ${cls}" data-filter="${id}" aria-pressed="${S.filter === id}">${l}${n ? `<b class="cn mono" id="cnt-${id}">${n}</b>` : ''}</button>`;
   return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (S.outbox ? `<button class="chip" data-act="outbox">Zaplanowane<b class="cn mono">${S.outbox}</b></button>` : '') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + ((S.accounts || []).some((a) => a.provider === 'imap') ? `<button class="chip" data-act="folders">Foldery…</button>` : '');
@@ -1084,7 +1102,6 @@ document.addEventListener('click', async (ev) => {
     else if (d.unpaid) { await post(`/api/items/${d.unpaid}`, { status: 'new' }); route(); }
     else if (d.bell) { await post(`/api/accounts/${d.bell}/notify`, { on: d.on !== '1' }); toast(d.on === '1' ? 'Skrzynka wyciszona' : 'Powiadomienia z tej skrzynki włączone'); viewAccounts(); }
     else if (d.pick !== undefined) { S.account = +d.pick; closeSheet(); route(); }
-    else if (d.act === 'more') await loadMore(el);
     else if (d.act === 'accmenu') accMenu();
     else if (d.act === 'addacc') addAccSheet();
     else if (d.act === 'demo') { await post('/api/accounts/demo'); toast('Dodano konto demo'); route(); }
@@ -1129,7 +1146,7 @@ document.addEventListener('change', async (ev) => {
     const st = r0.closest('.cstack'), top = st && r0.matches('.cstack > .row'), r = top ? st : r0;
     if (st && !top) setTimeout(() => { const n = st.querySelectorAll('.stki .row').length; if (!n) st.remove(); else { const c = $('.stkh i', st); if (c) c.textContent = `${n} wiadomości`; } }, 380);
     r.style.height = r.offsetHeight + 'px'; r.style.overflow = 'hidden';
-    requestAnimationFrame(() => { r.style.transition = 'height .32s ease, opacity .25s, margin .32s, padding .32s'; r.style.height = '0'; r.style.opacity = '0'; r.style.marginTop = '-8px'; r.style.paddingTop = '0'; r.style.paddingBottom = '0'; setTimeout(() => r.remove(), 340); });
+    requestAnimationFrame(() => { r.style.transition = 'height .32s ease, opacity .25s, margin .32s, padding .32s'; r.style.height = '0'; r.style.opacity = '0'; r.style.marginTop = '-8px'; r.style.paddingTop = '0'; r.style.paddingBottom = '0'; setTimeout(() => { r.remove(); topUp(); }, 340); });
   };
   const end = () => {
     if (!row) return; const r = row; row = null;

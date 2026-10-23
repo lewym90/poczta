@@ -583,3 +583,62 @@ test('stosy: Spam, Oferty i Kosz grupują po nadawcy, rozsunięcie zwraca człon
   await api('POST', '/api/messages/act', { ids: del.body.ids, action: 'restore' });
   assert.equal((await api('GET', '/api/messages/999999/stack')).status, 404);
 });
+
+test('reguły automatyczne: zapis, zastosowanie do istniejących, walidacja', async () => {
+  const bad1 = await api('POST', '/api/auto-rules', { field: 'subject', value: 'ab', action: 'archive' }); assert.equal(bad1.status, 400);
+  assert.equal((await api('POST', '/api/auto-rules', { field: 'from', value: 'x', action: 'archive' })).status, 400);
+  const inbox = (await api('GET', '/api/messages?limit=100')).body.messages, tgt = inbox.find((m) => m.from_addr);
+  const r = await api('POST', '/api/auto-rules', { field: 'from', value: tgt.from_addr.toUpperCase(), action: 'archive', apply: true });
+  assert.equal(r.status, 200); assert.ok(r.body.applied >= 1);
+  const arch = (await api('GET', '/api/messages?tab=archive&limit=100')).body.messages; assert.ok(arch.some((m) => m.id === tgt.id));
+  const list = (await api('GET', '/api/auto-rules')).body; assert.equal(list.rules.length, 1);
+  assert.equal((await api('DELETE', `/api/auto-rules/${list.rules[0].id}`)).status, 200);
+  await api('POST', '/api/messages/act', { ids: [tgt.id], action: 'unarchive' });
+});
+test('szablony odpowiedzi: dodanie, edycja, usunięcie', async () => {
+  assert.equal((await api('POST', '/api/templates', { name: '', body: 'x' })).status, 400);
+  const id = (await api('POST', '/api/templates', { name: 'Dzięki', body: 'Dziękuję, wracam jutro.' })).body.id;
+  await api('POST', '/api/templates', { id, name: 'Dzięki', body: 'Dziękuję!' });
+  assert.equal((await api('GET', '/api/templates')).body.templates[0].body, 'Dziękuję!');
+  await api('DELETE', `/api/templates/${id}`); assert.equal((await api('GET', '/api/templates')).body.templates.length, 0);
+});
+test('kopia zapasowa: tworzy plik, da się go pobrać i otworzyć jako baza', async () => {
+  const run = await api('POST', '/api/backup/run'); assert.equal(run.status, 200);
+  const name = run.body.name; const f = await fetch(`${base}/api/backup/file?name=${name}`, { headers: { cookie } }); assert.equal(f.status, 200);
+  const buf = Buffer.from(await f.arrayBuffer()); assert.equal(buf.subarray(0, 15).toString(), 'SQLite format 3');
+  assert.equal((await api('GET', '/api/backup/file?name=../../etc/passwd')).status, 404);
+  const k = await fetch(`${base}/api/backup/key`, { headers: { cookie } }); assert.match(await k.text(), /^POCZTA_SECRET_KEY=[0-9a-f]{64}/);
+});
+test('widżet: token włącza i wyłącza dostęp do podsumowania', async () => {
+  assert.equal((await api('GET', '/api/widget?token=zlytokenzlytokenzlytoken')).status, 401);
+  const t = (await api('POST', '/api/widget/token', {})).body.token; assert.ok(t.length > 20);
+  const w = (await fetch(`${base}/api/widget?token=${t}`)).json ? await (await fetch(`${base}/api/widget?token=${t}`)).json() : null;
+  assert.equal(typeof w.unread, 'number'); assert.ok('open' in w);
+  await api('POST', '/api/widget/token', { off: true }); assert.equal((await fetch(`${base}/api/widget?token=${t}`)).status, 401);
+});
+test('klucz dostępu: rejestracja i logowanie z symulowanym authenticatorem ES256', async () => {
+  const crypto = await import('node:crypto'); const host = new URL(base).host, rpId = host.replace(/:\d+$/, '');
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }); const jwk = publicKey.export({ format: 'jwk' });
+  const b = (x) => Buffer.from(x), u = (x) => Buffer.from(x).toString('base64url'), sha = (x) => crypto.createHash('sha256').update(x).digest();
+  const cb = (n) => (n < 24 ? Buffer.from([n]) : Buffer.from([24, n])), cnum = (n) => (n >= 0 ? Buffer.concat([Buffer.from([n < 24 ? n : 0x18]), n < 24 ? Buffer.alloc(0) : Buffer.from([n])]) : Buffer.from([0x20 + (-1 - n)]));
+  const cbytes = (x) => Buffer.concat([Buffer.from(x.length < 24 ? [0x40 | x.length] : [0x58, x.length]), x]);
+  const cose = Buffer.concat([Buffer.from([0xa5]), cnum(1), cnum(2), cnum(3), cnum(-7), cnum(-1), cnum(1), cnum(-2), cbytes(Buffer.from(jwk.x, 'base64url')), cnum(-3), cbytes(Buffer.from(jwk.y, 'base64url'))]);
+  const credId = crypto.randomBytes(16), cnt = Buffer.alloc(4); cnt.writeUInt32BE(1);
+  const authReg = Buffer.concat([sha(rpId), Buffer.from([0x45]), cnt, Buffer.alloc(16), Buffer.from([0, credId.length]), credId, cose]);
+  const attObj = Buffer.concat([Buffer.from([0xa3]), Buffer.from([0x63]), b('fmt'), Buffer.from([0x64]), b('none'), Buffer.from([0x67]), b('attStmt'), Buffer.from([0xa0]), Buffer.from([0x68]), b('authData'), Buffer.from([0x59, authReg.length >> 8, authReg.length & 255]), authReg]);
+  const o = (await api('POST', '/api/passkey/register/options', {})).body;
+  const cdj = (type, ch) => Buffer.from(JSON.stringify({ type, challenge: ch, origin: `http://${host}` }));
+  const reg = cdj('webauthn.create', o.challenge);
+  const rv = await api('POST', '/api/passkey/register/verify', { name: 'Test', response: { clientDataJSON: u(reg), attestationObject: u(attObj) } }); assert.equal(rv.status, 200, JSON.stringify(rv.body));
+  assert.equal((await api('GET', '/api/passkeys')).body.keys.length, 1);
+  const saved = cookie; cookie = '';
+  const lo = (await api('POST', '/api/passkey/login/options', {})).body; const cd = cdj('webauthn.get', lo.challenge);
+  const c2 = Buffer.alloc(4); c2.writeUInt32BE(2); const ad = Buffer.concat([sha(rpId), Buffer.from([0x05]), c2]);
+  const sig = crypto.sign('sha256', Buffer.concat([ad, sha(cd)]), privateKey);
+  const bad2 = await api('POST', '/api/passkey/login/verify', { id: u(credId), response: { clientDataJSON: u(cd), authenticatorData: u(ad), signature: u(Buffer.from('zly')) } }); assert.equal(bad2.status, 401);
+  const lo2 = (await api('POST', '/api/passkey/login/options', {})).body; const cd2 = cdj('webauthn.get', lo2.challenge); const sig2 = crypto.sign('sha256', Buffer.concat([ad, sha(cd2)]), privateKey);
+  const ok = await api('POST', '/api/passkey/login/verify', { id: u(credId), response: { clientDataJSON: u(cd2), authenticatorData: u(ad), signature: u(sig2) } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body)); assert.ok(cookie.startsWith('sid=')); assert.equal((await api('GET', '/api/state')).body.user.email, 'wlasciciel@example.com');
+  assert.equal((await api('POST', '/api/passkey/login/verify', { id: u(credId), response: { clientDataJSON: u(cd2), authenticatorData: u(ad), signature: u(sig2) } })).status, 401); // powtórka wyzwania
+  void saved; void cb; void sig;
+});

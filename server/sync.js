@@ -9,6 +9,7 @@ import { assessRisk } from './intel/risk.js';
 import { notifyNewMessages } from './push.js';
 import { startJobs } from './jobs.js';
 import { classify } from './intel/classify.js';
+import { loadAutoRules, matchAuto, autoCat } from './extras.js';
 import zlib from 'node:zlib';
 import { loadRules } from './mailbox.js';
 
@@ -69,25 +70,29 @@ export function storeMessages(acc, messages) {
   const insI = db.prepare(`INSERT OR IGNORE INTO found_items(user_id,message_id,kind,title,starts_at,ends_at,all_day,amount,currency,location,confidence,source,evidence,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   let added = 0, items = 0; const fresh = [];
-  const rules = loadRules(acc.user_id);
+  const rules = loadRules(acc.user_id), autoRules = loadAutoRules(acc.user_id);
   tx(() => {
     for (const m of messages) {
       const risk = assessRisk(m);
-      const sorted = classify({ ...m, risk: risk.risk }, rules);
+      let sorted = classify({ ...m, risk: risk.risk }, rules);
+      const ar = sorted.cat === 'inbox' ? matchAuto(autoRules, m) : null;
+      if (ar && autoCat(ar)) sorted = { cat: autoCat(ar), by: 'rule', why: 'Twoja reguła' };
       const blocked = sorted.cat === 'blocked';
-      const r = insM.run(acc.user_id, acc.id, 'INBOX', m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread && !blocked ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
+      const r = insM.run(acc.user_id, acc.id, 'INBOX', m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread && !blocked && ar?.action !== 'read' ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
       if (!r.changes) continue;
       added++;
       const id = Number(r.lastInsertRowid);
-      db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked ? Date.now() : null, id);
+      db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked || ['archive', 'trash'].includes(sorted.cat) ? Date.now() : null, id);
       if (m.html && !blocked && m.html.length < 3e6) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(m.html)), id);
       else if (!m.html) db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(id); // wiadomość tylko tekstowa: nie ma czego dociągać
       saveExtras(id, m);
+      if (ar?.action === 'star') db.prepare('UPDATE messages SET starred=1 WHERE id=?').run(id);
+      if (ar) db.prepare('UPDATE auto_rules SET hits=hits+1 WHERE id=?').run(ar.id);
       saveAtts(id, acc.user_id, m.atts);
       if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
       if (sorted.cat !== 'inbox') continue; // oferty i spam: bez powiadomień i bez wykrywania spraw
-      if (m.unread) fresh.push({ id, account_id: acc.id, fromAddr: m.fromAddr, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
+      if (m.unread && ar?.action !== 'read') fresh.push({ id, account_id: acc.id, fromAddr: m.fromAddr, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
       for (const it of extractItems({ subject: m.subject, body: m.body, fromName: m.fromName, ics: m.ics, received: new Date(m.date) })) {
         const x = insI.run(acc.user_id, id, it.kind, it.title, it.starts_at, it.ends_at, it.all_day, it.amount ?? null, it.currency ?? null, it.location ?? null, it.confidence, it.source, it.evidence, Date.now());
         items += Number(x.changes);

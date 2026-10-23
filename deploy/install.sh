@@ -90,6 +90,28 @@ systemctl is-active --quiet poczta || { journalctl -u poczta -n 20 --no-pager >&
 UP=0; for _ in $(seq 1 30); do curl -fsS -m 3 "http://127.0.0.1:$PORT/zdrowie" >/dev/null 2>&1 && { UP=1; break; }; sleep 1; done
 [ "$UP" = 1 ] || { journalctl -u poczta -n 15 --no-pager; die "usługa nie odpowiada lokalnie"; }
 
+# 5b) Automatyczne aktualizacje (raz na dobę, z wycofaniem przy porażce) i znacznik wersji
+cp "$TMP/deploy/update.sh" "$APP/update.sh" 2>/dev/null && chmod 755 "$APP/update.sh"
+( cd "$TMP" && tar -c server web package.json package-lock.json 2>/dev/null | sha256sum | cut -c1-40 ) > "$APP/.version"
+cat > /etc/systemd/system/poczta-update.service <<U
+[Unit]
+Description=Aktualizacja Poczty
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP/update.sh
+U
+cat > /etc/systemd/system/poczta-update.timer <<U
+[Unit]
+Description=Codzienna aktualizacja Poczty
+[Timer]
+OnCalendar=*-*-* 04:10:00
+RandomizedDelaySec=900
+Persistent=true
+[Install]
+WantedBy=timers.target
+U
+systemctl daemon-reload && systemctl enable --now poczta-update.timer >/dev/null 2>&1
+
 # 6) Trasa w Caddy (z walidacją i wycofaniem)
 mkdir -p "$CD"
 [ -f "$ROUTE" ] && cp -p "$ROUTE" "$ROUTE.bak"

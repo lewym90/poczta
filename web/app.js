@@ -958,7 +958,7 @@ function stackRow(m, i) {
   const L = n >= 6 ? 4 : n >= 4 ? 3 : n - 1, own = m.cat === 'sent' || m.cat === 'drafts';
   const name = own ? `Do: ${toNames(m.to_addr)}` : dispName(m.from_addr, m.from_name);
   return `<div class="cstack${n >= 6 ? ' big' : ''}" data-sid="${m.id}" style="--L:${L};--i:${i}">${Array.from({ length: L }, (_, k) => `<i class="slr" style="--k:${L - k}"></i>`).join('')}${msgRow(m, i, { stack: n })}
-    <button class="stkh gl" data-stkc="${m.id}" hidden aria-label="Zwiń"><span class="stn"><b>${esc(name)}</b><i class="mono">${n} ${n < 5 ? 'wiadomości' : 'wiadomości'}</i></span>${ic('down', 'i14')}</button><div class="stkx"></div></div>`;
+    <button class="stkh gl" data-stkc="${m.id}" hidden aria-label="Zwiń"><span class="stn"><b>${esc(name)}</b><i class="mono">${n} wiadomości</i></span>${ic('down', 'i14')}</button><div class="stkx"></div></div>`;
 }
 const SPRING = 'cubic-bezier(.22,1,.36,1)', POP = 'cubic-bezier(.34,1.45,.64,1)';
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1127,7 +1127,7 @@ document.addEventListener('change', async (ev) => {
   }, { passive: true });
   const collapse = (r0) => {
     const st = r0.closest('.cstack'), top = st && r0.matches('.cstack > .row'), r = top ? st : r0;
-    if (st && !top) setTimeout(() => { if (!$('.stki .row', st)) st.remove(); }, 380);
+    if (st && !top) setTimeout(() => { const n = st.querySelectorAll('.stki .row').length; if (!n) st.remove(); else { const c = $('.stkh i', st); if (c) c.textContent = `${n} wiadomości`; } }, 380);
     r.style.height = r.offsetHeight + 'px'; r.style.overflow = 'hidden';
     requestAnimationFrame(() => { r.style.transition = 'height .32s ease, opacity .25s, margin .32s, padding .32s'; r.style.height = '0'; r.style.opacity = '0'; r.style.marginTop = '-8px'; r.style.paddingTop = '0'; r.style.paddingBottom = '0'; setTimeout(() => r.remove(), 340); });
   };

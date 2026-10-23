@@ -30,7 +30,7 @@ export function storeMessages(acc, messages) {
       if (!r.changes) continue;
       added++;
       const id = Number(r.lastInsertRowid);
-      if (m.unread && risk.risk < 2) fresh.push({ id, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
+      if (m.unread && risk.risk < 2) fresh.push({ id, account_id: acc.id, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
       if (risk.risk >= 2) continue; // z podejrzanych wiadomości nie wyciągamy terminów
       for (const it of extractItems({ subject: m.subject, body: m.body, fromName: m.fromName, ics: m.ics, received: new Date(m.date) })) {

@@ -26,7 +26,7 @@ export async function sendToUser(userId, payload) {
   let sent = 0;
   await Promise.all(subs.map(async (s) => {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 3600, urgency: 'normal', vapidDetails: { subject: contact(userId), publicKey: vapid.publicKey, privateKey: vapid.privateKey } });
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 86400, urgency: payload.tag === 'test' ? 'normal' : 'high', vapidDetails: { subject: contact(userId), publicKey: vapid.publicKey, privateKey: vapid.privateKey } });
       sent++;
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) db.prepare('DELETE FROM push_subs WHERE id=?').run(s.id); // urządzenie wypisane
@@ -35,8 +35,29 @@ export async function sendToUser(userId, payload) {
   return sent;
 }
 
+// Ustawienia powiadomień użytkownika (tabela flags): tryb 'all' | 'important', ciche godziny "22:00-07:00".
+export function getPrefs(userId) {
+  const get = (k, d) => db.prepare('SELECT value FROM flags WHERE user_id=? AND key=?').get(userId, k)?.value ?? d;
+  return { mode: get('push_mode', 'all'), quiet: get('push_quiet', '') };
+}
+export function setPrefs(userId, { mode, quiet }) {
+  const put = (k, v) => db.prepare('INSERT INTO flags(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value').run(userId, k, v);
+  if (mode !== undefined) { if (!['all', 'important'].includes(mode)) throw new Error('Niepoprawny tryb'); put('push_mode', mode); }
+  if (quiet !== undefined) { if (quiet && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(quiet)) throw new Error('Niepoprawne ciche godziny'); put('push_quiet', quiet); }
+}
+export function inQuiet(quiet, now = new Date()) {
+  if (!quiet) return false;
+  const [a, b] = quiet.split('-');
+  const t = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: process.env.POCZTA_TZ || 'Europe/Warsaw' }).format(now);
+  return a <= b ? t >= a && t < b : t >= a || t < b; // zakres może przechodzić przez północ
+}
+
 const hhmm = (s) => (s.includes('T') ? s.slice(11, 16) : '');
 export async function notifyNewMessages(userId, fresh) {
+  const prefs = getPrefs(userId);
+  if (inQuiet(prefs.quiet)) return;
+  const muted = new Set(db.prepare('SELECT id FROM accounts WHERE user_id=? AND notify=0').all(userId).map((r) => r.id));
+  fresh = fresh.filter((f) => !muted.has(f.account_id) && !(prefs.mode === 'important' && !f.items.length));
   if (!fresh.length) return;
   if (fresh.length > 3) return void (await sendToUser(userId, { title: `${fresh.length} nowych wiadomości`, body: fresh.slice(0, 3).map((f) => f.fromName).join(', ') + '…', url: './#/', tag: 'batch' }));
   for (const f of fresh) {

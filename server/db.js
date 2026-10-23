@@ -46,6 +46,7 @@ const MIGRATIONS = [
      id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ua TEXT, created_at INTEGER NOT NULL);
    CREATE INDEX push_user ON push_subs(user_id);`,
+  `ALTER TABLE accounts ADD COLUMN notify INTEGER NOT NULL DEFAULT 1;`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

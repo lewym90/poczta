@@ -15,6 +15,7 @@ const P = {
   chev: '<path d="m9.500 5.500 6.500 6.500-6.500 6.500"/>', down: '<path d="m6 9.500 6 6 6-6"/>', back: '<path d="m14.500 5.500-6.500 6.500 6.500 6.500"/>',
   send: '<path d="M4 12 20 4l-4 16-4.500-6.500z"/>', plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="m6 6 12 12M18 6 6 18"/>', check: '<path d="m5 12.500 4.500 4.500L19 7.500"/>',
   shield: '<path class="f" d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 8.500v4M12 15.600v.1"/>',
+  bell: '<path d="M6 17.500V11a6 6 0 0 1 12 0v6.500l1.500 1.500h-15zM10 21h4"/>', bellOff: '<path d="M6 17.500V11a6 6 0 0 1 9-5.200M18 11v6.500l1.500 1.500h-15M10 21h4M4 4l16 16"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
@@ -213,7 +214,7 @@ async function viewSearch() {
 async function viewAccounts() {
   await loadAccounts();
   paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Konta i prywatność</span></div>
-    ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
+    ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-bell="${a.id}" data-on="${a.notify ? 1 : 0}" aria-pressed="${a.notify}" aria-label="Powiadomienia z ${esc(a.label)}" style="${a.notify ? '' : 'opacity:.55'}">${ic(a.notify ? 'bell' : 'bellOff', 'i18')}</button><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
     <div class="actions" style="margin-top:14px"><button class="btn pri grow" data-act="addacc">${ic('plus', 'i18')}Dodaj skrzynkę</button>${S.demoAllowed && !S.accounts.some((a) => a.provider === 'demo') ? '<button class="btn" data-act="demo">Tryb demo</button>' : ''}</div>
     <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
@@ -243,16 +244,22 @@ async function pushState() {
   const sub = await reg.pushManager.getSubscription();
   return { ok: true, perm: Notification.permission, on: !!sub && Notification.permission === 'granted', reg, sub };
 }
+const QUIET = [['', 'Wyłączone'], ['22:00-07:00', '22:00–07:00'], ['23:00-06:00', '23:00–06:00'], ['00:00-08:00', '00:00–08:00']];
+const sw = (on, act, label) => `<button class="sw ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" data-act="${act}"><i></i></button>`;
 async function renderPushCard() {
   const el = $('#pushcard'); if (!el) return;
   const st = await pushState().catch(() => ({ ok: false, why: 'Nie udało się sprawdzić powiadomień.' }));
   if (!$('#pushcard')) return;
   const live = S.accounts.some((a) => a.live);
   const head = `<div class="k mono" style="color:${live ? 'var(--ok)' : 'var(--ink2)'}">${ic('spark', 'i14')}${live ? 'Nowe wiadomości na żywo' : 'Sprawdzanie co kilka minut'}</div>`;
-  el.innerHTML = head + (!st.ok ? `<div class="wh" style="line-height:21px;margin-top:8px">${esc(st.why)}</div>`
-    : st.perm === 'denied' ? `<div class="wh" style="line-height:21px;margin-top:8px">Powiadomienia są zablokowane. Włącz je w Ustawienia iPhone'a → Poczta → Powiadomienia.</div>`
-    : st.on ? `<div class="wh" style="line-height:21px;margin-top:8px">Powiadomienia włączone na tym urządzeniu. Dostaniesz je, gdy przyjdzie nowa wiadomość, także z wykrytym terminem.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button><button class="btn" data-act="pushoff">Wyłącz</button></div>`
-    : `<div class="wh" style="line-height:21px;margin-top:8px">Otrzymasz powiadomienie o nowej wiadomości, także z wykrytym terminem. Treść idzie przez serwery Apple tylko jako zaszyfrowany sygnał.</div><div class="actions"><button class="btn pri grow" data-act="pushon">${ic('spark', 'i18')}Włącz powiadomienia</button></div>`);
+  const row = (on) => `<div class="kv" style="align-items:center"><span>Powiadamiaj na tym iPhonie</span>${sw(on, on ? 'pushoff' : 'pushon', 'Powiadomienia')}</div>`;
+  if (!st.ok) { el.innerHTML = head + `<div class="wh" style="line-height:21px;margin-top:8px">${esc(st.why)}</div>`; return; }
+  if (st.perm === 'denied') { el.innerHTML = head + `<div class="wh" style="line-height:21px;margin-top:8px">Powiadomienia są zablokowane. Włącz je w Ustawienia iPhone'a → Poczta → Powiadomienia.</div>`; return; }
+  if (!st.on) { el.innerHTML = head + row(false) + `<div class="wh" style="line-height:21px;margin-top:4px">Dostaniesz powiadomienie o nowej wiadomości, także gdy aplikacja jest zamknięta, a telefon uśpiony. Treść idzie przez serwery Apple tylko jako zaszyfrowany sygnał.</div>`; return; }
+  const pr = await get('/api/push/prefs').catch(() => ({ mode: 'all', quiet: '' }));
+  el.innerHTML = head + row(true) + `<div class="fld"><label for="pmode">Które wiadomości</label><select class="in" id="pmode"><option value="all"${pr.mode === 'all' ? ' selected' : ''}>Wszystkie nowe</option><option value="important"${pr.mode === 'important' ? ' selected' : ''}>Tylko z terminem, paczką lub płatnością</option></select></div>`
+    + `<div class="fld"><label for="pquiet">Ciche godziny (bez powiadomień)</label><select class="in" id="pquiet">${QUIET.map(([v, t]) => `<option value="${v}"${pr.quiet === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
+    + `<div class="wh" style="line-height:21px;margin-top:8px">Ustawienia dotyczą wszystkich Twoich urządzeń. Dzwonek przy skrzynce wycisza tylko tę skrzynkę.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button></div>`;
 }
 async function pushOn() {
   const st = await pushState(); if (!st.ok) throw new Error(st.why);
@@ -261,8 +268,9 @@ async function pushOn() {
   const { key } = await get('/api/push/key');
   const sub = st.sub || await st.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
   await post('/api/push/subscribe', { subscription: sub.toJSON() });
+  try { localStorage.setItem('pushwanted', '1'); } catch {}
 }
-async function pushOff() { const st = await pushState(); if (st.sub) { await post('/api/push/unsubscribe', { endpoint: st.sub.endpoint }).catch(() => {}); await st.sub.unsubscribe(); } }
+async function pushOff() { try { localStorage.removeItem('pushwanted'); } catch {} const st = await pushState(); if (st.sub) { await post('/api/push/unsubscribe', { endpoint: st.sub.endpoint }).catch(() => {}); await st.sub.unsubscribe(); } }
 
 // ---- arkusze ----
 function calSheet(it) {
@@ -322,7 +330,7 @@ async function route() {
 window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true); route(); });
 
 document.addEventListener('click', async (ev) => {
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-reply],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-reply],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -336,6 +344,7 @@ document.addEventListener('click', async (ev) => {
     else if (d.reply) composeSheet(S.cur);
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
+    else if (d.bell) { await post(`/api/accounts/${d.bell}/notify`, { on: d.on !== '1' }); toast(d.on === '1' ? 'Skrzynka wyciszona' : 'Powiadomienia z tej skrzynki włączone'); viewAccounts(); }
     else if (d.pick !== undefined) { S.account = +d.pick; closeSheet(); route(); }
     else if (d.act === 'accmenu') accMenu();
     else if (d.act === 'addacc') addAccSheet();
@@ -350,7 +359,27 @@ document.addEventListener('click', async (ev) => {
     else if (d.act === 'retry') route();
   } catch (e) { toast(e.message || 'Błąd'); el.disabled = false; }
 });
+document.addEventListener('change', async (ev) => {
+  const t = ev.target;
+  try {
+    if (t.id === 'pmode') await post('/api/push/prefs', { mode: t.value });
+    else if (t.id === 'pquiet') await post('/api/push/prefs', { quiet: t.value });
+    else return;
+    toast('Zapisano');
+  } catch (e) { toast(e.message || 'Błąd'); }
+});
 $('#fab').onclick = () => composeSheet();
+// Samonaprawa: iOS bywa, że gubi subskrypcję, a serwer zna tylko starą. Przy starcie odnawiamy ją po cichu.
+async function pushHeal() {
+  try {
+    if (!S.user || S.offline || !('PushManager' in window) || Notification.permission !== 'granted') return;
+    let wanted = false; try { wanted = !!localStorage.getItem('pushwanted'); } catch {}
+    const st = await pushState(); if (!st.ok) return;
+    let sub = st.sub;
+    if (!sub && wanted) { const { key } = await get('/api/push/key'); sub = await st.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) }); }
+    if (sub) await post('/api/push/subscribe', { subscription: sub.toJSON() });
+  } catch { /* cicho */ }
+}
 async function findItem(id) {
   const loc = S.cur?.items.find((i) => i.id === id); if (loc) return loc;
   const r = await get('/api/today'); return r.items.find((i) => i.id === id) || (await get('/api/items?status=new')).items.find((i) => i.id === id);
@@ -361,7 +390,7 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   try { const s = await get('/api/state'); S.user = s.user; S.setupNeeded = s.setupNeeded; S.demoAllowed = s.demoAllowed; }
   catch { S.user = cacheGet('inbox') ? { email: 'offline' } : null; S.offline = true; }
-  route();
+  route(); pushHeal();
   if (S.user && 'EventSource' in window) {
     const es = new EventSource('api/events');
     es.addEventListener('sync', (e) => { const d = JSON.parse(e.data); toast(`Nowe wiadomości: ${d.added}`); if (/^(#\/?|#\/today)?$/.test(location.hash)) { S.animate = false; route(); } });

@@ -104,3 +104,38 @@ test('powiadomienia: nowe wiadomości po pierwszej synchronizacji trafiają do l
   assert.equal(r.fresh.length, 1); assert.equal(r.fresh[0].items[0].kind, 'parcel');
   assert.equal(storeMessages(acc, [m]).fresh.length, 0); // duplikat
 });
+
+test('ustawienia powiadomień: tryb, ciche godziny, wyciszenie skrzynki', async () => {
+  assert.equal((await api('GET', '/api/push/prefs')).body.mode, 'all');
+  assert.equal((await api('POST', '/api/push/prefs', { mode: 'zly' })).status, 400);
+  assert.equal((await api('POST', '/api/push/prefs', { quiet: '25:00-07:00' })).status, 400);
+  const r = await api('POST', '/api/push/prefs', { mode: 'important', quiet: '22:00-07:00' });
+  assert.deepEqual([r.body.mode, r.body.quiet], ['important', '22:00-07:00']);
+  const { inQuiet } = await import('../server/push.js');
+  assert.equal(inQuiet('22:00-07:00', new Date('2026-10-23T21:30:00Z')), true);  // 23:30 w Warszawie
+  assert.equal(inQuiet('22:00-07:00', new Date('2026-10-23T10:00:00Z')), false);
+  assert.equal(inQuiet('', new Date()), false);
+  const acc = (await api('GET', '/api/accounts')).body.accounts[0];
+  assert.equal(acc.notify, true);
+  await api('POST', `/api/accounts/${acc.id}/notify`, { on: false });
+  assert.equal((await api('GET', '/api/accounts')).body.accounts[0].notify, false);
+  await api('POST', `/api/accounts/${acc.id}/notify`, { on: true });
+  await api('POST', '/api/push/prefs', { mode: 'all', quiet: '' });
+});
+test('powiadomienia respektują wyciszenie i tryb "ważne"', async () => {
+  const { db } = await import('../server/db.js');
+  const push = await import('../server/push.js');
+  const acc = db.prepare("SELECT * FROM accounts WHERE provider='demo'").get();
+  const uid = acc.user_id;
+  db.prepare('INSERT OR REPLACE INTO push_subs(user_id,endpoint,p256dh,auth,created_at) VALUES(?,?,?,?,?)').run(uid, 'https://127.0.0.1:1/x', 'k', 'a', 1);
+  // wysyłka do martwego endpointu się nie uda, ale nie może rzucić wyjątku ani zawisnąć
+  const plain = [{ id: 1, account_id: acc.id, fromName: 'A', subject: 's', items: [] }];
+  await push.notifyNewMessages(uid, plain);
+  push.setPrefs(uid, { mode: 'important' });
+  await push.notifyNewMessages(uid, plain); // odfiltrowane, brak rzutu
+  db.prepare('UPDATE accounts SET notify=0 WHERE id=?').run(acc.id);
+  await push.notifyNewMessages(uid, [{ ...plain[0], items: [{ kind: 'parcel', starts_at: '2026-10-24' }] }]);
+  db.prepare('UPDATE accounts SET notify=1 WHERE id=?').run(acc.id);
+  push.setPrefs(uid, { mode: 'all' });
+  db.prepare('DELETE FROM push_subs').run();
+});

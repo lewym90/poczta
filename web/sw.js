@@ -1,5 +1,5 @@
 // Service worker: powłoka aplikacji offline. Dane z API zawsze z sieci (offline czyta aplikacja z własnej pamięci).
-const V = 'poczta-v2';
+const V = 'poczta-v3';
 const SHELL = ['./', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -26,4 +26,14 @@ self.addEventListener('notificationclick', (e) => {
     if (c) { await c.focus(); if ('navigate' in c) return c.navigate(url).catch(() => {}); }
     return self.clients.openWindow(url);
   }));
+});
+
+// iOS potrafi unieważnić subskrypcję: odnawiamy ją i zgłaszamy serwerowi.
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil((async () => {
+    const h = { 'Content-Type': 'application/json', 'X-Poczta': '1' };
+    const { key } = await (await fetch('api/push/key', { headers: h })).json();
+    const sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await fetch('api/push/subscribe', { method: 'POST', headers: h, body: JSON.stringify({ subscription: sub.toJSON() }) });
+  })().catch(() => {}));
 });

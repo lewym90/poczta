@@ -289,3 +289,22 @@ test('zaproszenia: właściciel zaprasza, gość zakłada konto, dane są rozdzi
   assert.equal((await api('GET', '/api/people')).body.users.length, before - 1);
   assert.equal((await api('DELETE', `/api/people/${p.body.users.find((u) => u.plan === 'owner').id}`)).status, 400); // właściciela nie usuniesz
 });
+
+test('uzupełnianie HTML w tle: wiadomości bez oryginału dostają go przed otwarciem, tekstowe nie są pobierane ponownie', async () => {
+  const { db } = await import('../server/db.js');
+  const { backfillHtml, storeMessages } = await import('../server/sync.js');
+  const { imap } = await import('../server/providers/imap.js');
+  const zlib = await import('node:zlib');
+  const uid = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get().id;
+  const acc = db.prepare("INSERT INTO accounts(user_id,label,provider,email,config,created_at) VALUES(?,?,?,?,?,?)").run(uid, 'bf', 'imap', 'bf@example.com', '{"imap":{}}', Date.now());
+  const a = { id: Number(acc.lastInsertRowid), user_id: uid };
+  const mk = (u, html) => ({ uid: u, messageId: `<bf${u}>`, fromName: 'X', fromAddr: `x${u}@example.org`, toAddr: '', subject: `bf ${u}`, body: 'treść', snippet: 'treść', date: Date.now() - u, unread: true, hasAttach: false, ics: [], html, unsub: false, bulk: false });
+  storeMessages(a, [mk(1, ''), mk(2, '')]);
+  db.prepare('UPDATE messages SET html_try=0 WHERE account_id=?').run(a.id); // jak wiadomości zapisane przed wprowadzeniem HTML
+  let calls = 0;
+  imap.fetchHtmlBatch = async (c, p, uids) => { calls++; return uids.filter((u) => u === 1).map((u) => ({ uid: u, html: '<p>oryginał</p>' })); };
+  assert.equal(await backfillHtml(a.id), 1);
+  const rows = db.prepare('SELECT uid,html_z,html_try FROM messages WHERE account_id=? ORDER BY uid').all(a.id);
+  assert.equal(zlib.inflateSync(rows[0].html_z).toString(), '<p>oryginał</p>'); assert.equal(rows[1].html_z, null); assert.equal(rows[1].html_try, 2);
+  await backfillHtml(a.id); assert.equal(calls, 1); // nic więcej do pobrania
+});

@@ -91,6 +91,20 @@ export const imap = {
       } finally { lock.release(); }
     } finally { await c.logout().catch(() => {}); }
   },
+  // Dociąga HTML wielu wiadomości jednym połączeniem (uzupełnianie w tle). Zwraca [{uid, html}].
+  async fetchHtmlBatch(cfg, pass, uids) {
+    const c = client(cfg, pass), out = [];
+    try {
+      await c.connect();
+      const lock = await c.getMailboxLock('INBOX');
+      try {
+        for await (const m of c.fetch(uids.join(','), { uid: true, source: { maxLength: 6 * 1024 * 1024 } }, { uid: true })) {
+          try { out.push({ uid: m.uid, html: (await normalize({ ...m, flags: new Set() })).html || '' }); } catch { out.push({ uid: m.uid, html: '' }); }
+        }
+      } finally { lock.release(); }
+    } finally { await c.logout().catch(() => {}); }
+    return out;
+  },
   // Przenosi wiadomości do kosza u dostawcy (odwracalne u niego przez ok. 30 dni). Zwraca liczbę przeniesionych.
   async trash(cfg, pass, uids) {
     const c = client(cfg, pass);

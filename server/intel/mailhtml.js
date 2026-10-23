@@ -15,6 +15,7 @@ const px = (v) => { const m = String(v || '').match(/^\s*(\d+)(px)?\s*$/i); retu
 export function cleanCss(css, imgUrl) {
   return String(css)
     .replace(/@import[^;]*;?/gi, '')
+    .replace(/prefers-color-scheme\s*:\s*dark/gi, 'min-width:99999px') // maile mają wyglądać jak w jasnym motywie; styl "ciemny" bez naszego tła dawałby biały tekst na białym
     .replace(/expression\s*\(|behavior\s*:|-moz-binding\s*:|javascript\s*:|vbscript\s*:/gi, 'x')
     .replace(/url\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi, (m, q, u) => { const r = imgUrl(u.trim().replace(/&amp;/g, '&')); return r ? `url("${r.replace(/"/g, '%22')}")` : 'none'; });
 }
@@ -88,5 +89,5 @@ export function cleanHtml(raw, { images = true, proxy = 'api/img?u=' } = {}) {
 
 // Pełny dokument do iframe: CSP bez skryptów, tylko obrazki z tej samej domeny (proxy) i data:.
 export function frameDoc(inner) {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0}body{background:#fff;color:#1a1a1a;font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;word-wrap:break-word;overflow-wrap:anywhere;-webkit-text-size-adjust:100%}img{max-width:100%;height:auto;border:0}table{border-collapse:collapse}a{color:#1a56db}blockquote{margin:8px 0 8px 4px;padding-left:12px;border-left:3px solid #ccc;color:#555}pre{white-space:pre-wrap}img[data-blocked]{display:inline-block;min-width:40px;min-height:24px;background:#eee;outline:1px dashed #bbb}</style></head><body>${inner}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="only light"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"><base target="_blank"><style>:root{color-scheme:only light}html,body{margin:0;padding:0}body{background:#fff;color:#1a1a1a;font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;word-wrap:break-word;overflow-wrap:anywhere;-webkit-text-size-adjust:100%}img{max-width:100%;height:auto;border:0}table{border-collapse:collapse}a{color:#1a56db}blockquote{margin:8px 0 8px 4px;padding-left:12px;border-left:3px solid #ccc;color:#555}pre{white-space:pre-wrap}img[data-blocked]{display:inline-block;min-width:40px;min-height:24px;background:#eee;outline:1px dashed #bbb}</style></head><body>${inner}</body></html>`;
 }

@@ -39,6 +39,7 @@ export function storeMessages(acc, messages) {
       const id = Number(r.lastInsertRowid);
       db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked ? Date.now() : null, id);
       if (m.html && !blocked && m.html.length < 3e6) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(m.html)), id);
+      else if (!m.html) db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(id); // wiadomość tylko tekstowa: nie ma czego dociągać
       if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
       if (sorted.cat !== 'inbox') continue; // oferty i spam: bez powiadomień i bez wykrywania spraw
@@ -51,6 +52,30 @@ export function storeMessages(acc, messages) {
     }
   });
   return { added, items, fresh };
+}
+
+// Uzupełnianie oryginalnego HTML w tle: każda wiadomość czeka gotowa, zanim ją otworzysz (najpierw najnowsze, partiami po 25).
+const filling = new Set();
+export async function backfillHtml(accId) {
+  if (filling.has(accId)) return 0;
+  const acc = db.prepare("SELECT * FROM accounts WHERE id=? AND provider='imap'").get(accId); if (!acc) return 0;
+  filling.add(accId); let done = 0;
+  try {
+    for (let round = 0; round < 12; round++) {
+      const rows = db.prepare("SELECT id,uid FROM messages WHERE account_id=? AND html_z IS NULL AND html_try=0 AND cat NOT IN ('blocked') ORDER BY date DESC LIMIT 25").all(accId);
+      if (!rows.length) break;
+      const mark = db.prepare('UPDATE messages SET html_try=2 WHERE id=? AND html_z IS NULL'), put = db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?');
+      let got;
+      try { got = await imap.fetchHtmlBatch({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), rows.map((r) => r.uid)); }
+      catch { for (const r of rows) db.prepare('UPDATE messages SET html_try=html_try WHERE id=?').run(r.id); break; } // błąd połączenia: spróbujemy przy następnej okazji
+      const byUid = new Map(got.map((g) => [g.uid, g.html]));
+      for (const r of rows) {
+        const h = byUid.get(r.uid);
+        if (h && h.length < 3e6) { put.run(zlib.deflateSync(Buffer.from(h)), r.id); done++; } else mark.run(r.id);
+      }
+    }
+  } finally { filling.delete(accId); }
+  return done;
 }
 
 export async function syncAccount(id) {
@@ -67,6 +92,7 @@ export async function syncAccount(id) {
       emit(acc.user_id, 'sync', { account: id, added: r.added, items: r.items });
       if (acc.last_uid > 0 && r.fresh.length) notifyNewMessages(acc.user_id, r.fresh).catch(() => {}); // pierwsza synchronizacja nie zasypuje powiadomieniami
     }
+    backfillHtml(id).catch(() => {});
     return { added: r.added, items: r.items };
   } catch (e) {
     const msg = String(e.responseText || e.message || e).slice(0, 300);
@@ -105,7 +131,8 @@ export function unwatchAccount(id) {
 export const watching = (id) => !!watchers.get(id)?.live;
 
 export function startScheduler() {
-  for (const { id } of db.prepare("SELECT id FROM accounts WHERE provider='imap'").all()) watchAccount(id);
+  db.prepare('UPDATE messages SET html_try=0 WHERE html_z IS NULL AND html_try=1').run(); // przerwane dociąganie z poprzedniego uruchomienia
+  for (const { id } of db.prepare("SELECT id FROM accounts WHERE provider='imap'").all()) { watchAccount(id); setTimeout(() => backfillHtml(id).catch(() => {}), 4000); }
   // Zapasowe odpytywanie: rzadziej, gdy IDLE działa.
   const tick = async () => {
     for (const { id } of db.prepare("SELECT id FROM accounts WHERE provider!='demo'").all()) await syncAccount(id);

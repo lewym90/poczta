@@ -218,10 +218,11 @@ route('GET', '/api/messages/:id', async (ctx) => {
     if (!m.html_try) { // dociąganie w tle: otwarcie wiadomości nie czeka na serwer poczty
       db.prepare('UPDATE messages SET html_try=1 WHERE id=?').run(m.id);
       const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
-      Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 20000))])
-        .then((h) => { if (h) db.prepare('UPDATE messages SET html_z=? WHERE id=?').run(zlib.deflateSync(Buffer.from(h)), m.id); else db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); })
-        .catch(() => db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id));
-      pending = true;
+      const job = Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 20000))])
+        .then((h) => { if (h) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(h)), m.id); else db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); return h || ''; })
+        .catch(() => { db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); return ''; });
+      rawHtml = await Promise.race([job, new Promise((r) => setTimeout(() => r(null), 4000))]) ?? ''; // krótko czekamy, żeby szybkie dociągnięcie było od razu widoczne
+      pending = !rawHtml;
     } else if (m.html_try === 1) pending = true;
   }
   const pref = imagesOn(ctx.user.id), images = pref || ctx.query.get('images') === '1';

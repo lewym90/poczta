@@ -161,6 +161,9 @@ async function viewInbox() {
     ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
     ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
   nav('inbox');
+  // wiadomości na górze listy pobieramy z góry, więc otwierają się natychmiast
+  S.pre ||= new Map();
+  (async () => { for (const m of msgs.messages.slice(0, 8)) { if (S.pre.has(m.id) || !location.hash.match(/^#\/?$/)) continue; try { S.pre.set(m.id, { t: Date.now(), r: await get(`/api/messages/${m.id}`) }); } catch {} } })();
   const ch = $('.chips .chip[aria-pressed=true]'); if (ch) ch.parentElement.scrollLeft = Math.max(0, ch.offsetLeft - 40);
 }
 
@@ -279,13 +282,14 @@ function mountFrame(doc) {
   };
   const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
   const reveal = () => { if (!f.isConnected) return; fit(); $('#body')?.classList.remove('pend'); $('#ptext')?.remove(); $('#ldg')?.remove(); };
-  f.onload = () => { fit(); const imgs = [...f.contentDocument.images].filter((i) => !i.complete); Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 2500))]).then(reveal); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
+  f.onload = () => { fit(); const imgs = [...f.contentDocument.images].filter((i) => !i.complete); Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 700))]).then(reveal); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
   f.srcdoc = doc;
   window.addEventListener('resize', later, { passive: true });
 }
 
 async function viewMessage(id) {
-  const { message: m, items } = await get(`/api/messages/${id}${S.forceImg === +id ? '?images=1' : ''}`);
+  const pre = S.pre?.get(+id); S.pre?.delete(+id);
+  const { message: m, items } = pre && Date.now() - pre.t < 120000 && S.forceImg !== +id ? pre.r : await get(`/api/messages/${id}${S.forceImg === +id ? '?images=1' : ''}`);
   if (m.unread) post(`/api/messages/${id}/read`).then(() => { S.unread = Math.max(0, S.unread - 1); badge(); }).catch(() => {});
   const risky = m.risk >= 2;
   const framed = !!m.frame, html = framed && (cacheGet('mode') || 'html') !== 'text';

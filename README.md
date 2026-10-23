@@ -87,3 +87,13 @@ Uwaga: administrator serwera technicznie ma dostęp do bazy i klucza szyfrujące
 - **Rozmowy**: wiadomości o tym samym temacie (bez Re:/Fwd:) w jednej skrzynce są powiązane; licznik na liście, sekcja „W tej rozmowie” w wiadomości.
 - **Cofnij** po oznaczeniu spamu/oferty/blokady usuwa też regułę nadawcy.
 - **Znane ograniczenia**: gwiazdka i flaga „przeczytane” zmienione poza Pocztą nie są jeszcze odświeżane dla już pobranych wiadomości; cofnięcie archiwizacji po wykonaniu jej u dostawcy przywraca tylko widok w aplikacji.
+
+## Kontakty (etap 6)
+
+Zakładka **Kontakty** na dolnym pasku to własna książka adresowa każdej osoby: nazwa + jeden lub kilka adresów + notatka. **Nic nie jest importowane z telefonu** – kontakty powstają tylko tutaj (przycisk +, albo „Dodaj do kontaktów” przy adresie w wiadomości). Pod listą są podpowiedzi „z korespondencji” (osoby, od których dostałeś lub do których pisałeś, a których jeszcze nie ma w kontaktach).
+
+- Na listach i w wiadomości widać Twoją nazwę kontaktu, a pod nią adres.
+- W polach Do / Dw / UDW wpisujesz „Mich…”, dostajesz podpowiedzi (kontakty i korespondenci, po nazwie lub adresie), a wybrany kontakt pojawia się jako kafelek z nazwą i adresem.
+- Każdy adres (nadawca, odbiorcy, treść tekstowa, oryginał HTML, linki `mailto:`) jest klikalny: napisz, odpowiedz, dodaj/edytuj kontakt, kopiuj, zablokuj nadawcę.
+- Powiadomienia push używają nazwy z kontaktów.
+- Okna (nowa wiadomość, menu) zamykasz też przeciągnięciem w dół za uchwyt; niezapisana wiadomość pyta o szkic.

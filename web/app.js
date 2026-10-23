@@ -20,6 +20,7 @@ const P = {
   bell: '<path d="M6 17.500V11a6 6 0 0 1 12 0v6.500l1.500 1.500h-15zM10 21h4"/>', bellOff: '<path d="M6 17.500V11a6 6 0 0 1 9-5.200M18 11v6.500l1.500 1.500h-15M10 21h4M4 4l16 16"/>',
   star: '<path d="m12 3.800 2.600 5.300 5.800.800-4.200 4.100 1 5.800L12 17.100 6.800 19.800l1-5.800-4.200-4.100 5.800-.800z"/>',
   clip: '<path d="m19 11.500-7.200 7.200a4.500 4.500 0 0 1-6.400-6.400l8-8a3 3 0 0 1 4.200 4.200l-8 8a1.500 1.500 0 0 1-2.100-2.100l7-7"/>', file: '<path d="M7 3.500h6.500L18.500 8.500v11a1 1 0 0 1-1 1h-10.500a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z"/><path d="M13.500 3.500v5h5"/>',
+  book: '<rect class="f" x="5" y="3.500" width="14" height="17" rx="2.500"/><rect x="5" y="3.500" width="14" height="17" rx="2.500"/><circle cx="12" cy="10" r="2.200"/><path d="M8.500 16.500c.5-1.800 1.900-2.700 3.500-2.700s3 .9 3.500 2.700M3 8h2M3 12h2M3 16h2"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
@@ -90,7 +91,7 @@ function whenText(it) {
   const dl = dayLabel(it);
   return tr ? (diff <= 1 ? `${dl} ${tr}` : `${dl} · ${tr}`) : dl;
 }
-const initials = (n) => String(n || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('') || '?';
+const initials = (n) => String(n || '?').split(/[\s@.]+/).map((x) => x.replace(/^[^\p{L}\p{N}]+/u, '')).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('') || '?';
 const hue = (s) => 'g' + ([...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % 5);
 const ago = (ts) => { if (!ts) return 'jeszcze nie synchronizowano'; const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'przed chwilą' : m < 60 ? `${m} min temu` : m < 1440 ? `${Math.round(m / 60)} godz. temu` : `${Math.round(m / 1440)} dni temu`; };
 
@@ -104,15 +105,41 @@ function toast(msg, action, ms) {
 function sheet(html, onMount) {
   closeSheet(true);
   const root = $('#sheet-root');
-  root.innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div>`;
+  root.innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><button class="sx" type="button" aria-label="Zamknij">${ic('x', 'i18')}</button>${html}</div>`;
   const sc = $('.scrim', root), sh = $('.sheet', root);
   requestAnimationFrame(() => { sc.classList.add('on'); sh.classList.add('on'); });
-  sc.onclick = () => closeSheet();
+  sc.onclick = () => requestClose();
+  $('.sx', sh).onclick = () => requestClose();
+  dragClose(sh, sc);
   onMount?.(sh);
   return sh;
 }
+// zamknięcie "z pytaniem": okno może mieć strażnika (np. kompozytor z niezapisaną treścią)
+function requestClose() { if (S.sheetGuard && !S.sheetGuard()) return; closeSheet(); }
+// przeciągnięcie okna w dół (od uchwytu, nagłówka albo z góry listy) zamyka je
+function dragClose(sh, sc) {
+  let y0 = 0, dy = 0, t0 = 0, on = false, ok = false;
+  const isCtl = (el) => el.closest('input,textarea,select,button:not(.sx),a,label,[contenteditable]');
+  sh.addEventListener('touchstart', (e) => {
+    const t = e.touches[0]; y0 = t.clientY; dy = 0; t0 = Date.now(); on = false;
+    ok = e.target.closest('.grab,.sx,h2') || (sh.scrollTop <= 0 && !isCtl(e.target));
+  }, { passive: true });
+  sh.addEventListener('touchmove', (e) => {
+    if (!ok) return;
+    dy = e.touches[0].clientY - y0;
+    if (!on && dy > 8 && sh.scrollTop <= 0) { on = true; sh.style.transition = 'none'; }
+    if (on) { e.preventDefault(); const d = Math.max(0, dy); sh.style.transform = `translate(-50%,${d}px)`; sc.style.opacity = String(Math.max(0, 1 - d / 500)); }
+  }, { passive: false });
+  const end = () => {
+    if (!on) return; on = false; sh.style.transition = '';
+    const v = dy / Math.max(1, Date.now() - t0);
+    if (dy > 110 || v > 0.6) { sh.style.transform = ''; sc.style.opacity = ''; requestClose(); }
+    else { sh.style.transform = ''; sc.style.opacity = ''; }
+  };
+  sh.addEventListener('touchend', end); sh.addEventListener('touchcancel', end);
+}
 function closeSheet(now) {
-  const root = $('#sheet-root'); if (!root.firstChild) return;
+  const root = $('#sheet-root'); S.sheetGuard = null; if (!root.firstChild) return;
   if (now) { root.innerHTML = ''; return; }
   $('.scrim', root)?.classList.remove('on'); $('.sheet', root)?.classList.remove('on');
   setTimeout(() => { root.innerHTML = ''; }, 380);
@@ -140,8 +167,8 @@ function msgRow(m, i) {
   const why = !snz && m.cat && m.cat !== 'inbox' && m.cat_why && m.risk < 2 ? `<span class="cp snz">${ic('tag', 'i14')}${esc(m.cat_why)}</span>` : '';
   const chip = snz || why || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
   return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
-    <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_addr)}">${esc(initials(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_name))}</div></div>
-    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
+    <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_addr)}">${esc(initials(m.cat === 'sent' || m.cat === 'drafts' ? (addrList(m.to_addr).map((a) => cn(a))[0] || m.to_addr) : dispName(m.from_addr, m.from_name)))}</div></div>
+    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : esc(dispName(m.from_addr, m.from_name))}</span></span><span class="tm mono">${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
     <div class="sj">${m.thread_n > 1 ? `<span class="thn mono">${m.thread_n}</span>` : ''}${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : `<div class="sn">${esc(m.snippet)}</div>`}</div></button>`;
 }
 
@@ -322,7 +349,7 @@ function mountFrame(doc) {
   };
   const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
   const reveal = () => { if (!f.isConnected) return; fit(); $('#body')?.classList.remove('pend'); $('#ptext')?.remove(); $('#ldg')?.remove(); };
-  f.onload = () => { fit(); const imgs = [...f.contentDocument.images].filter((i) => !i.complete); Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 700))]).then(reveal); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
+  f.onload = () => { hookFrameMail(f.contentDocument); fit(); const imgs = [...f.contentDocument.images].filter((i) => !i.complete); Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 700))]).then(reveal); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
   f.srcdoc = doc;
   window.addEventListener('resize', later, { passive: true });
 }
@@ -336,19 +363,21 @@ async function viewMessage(id) {
   const d = new Date(m.date);
   const clean = (t) => String(t || '').replace(/^[ \t]*\[https?:\/\/[^\]\s]+\][ \t]*$/gm, '').replace(/\[(https?:\/\/[^\]\s]+)\]/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
   const linkify = (t) => esc(clean(t)).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
+  const rich = (t) => withMail(linkify(t));
   paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button>${own ? `<span style="display:flex;gap:8px"><button class="round gl" data-orgact="delete" data-orgid="${m.id}" aria-label="Usuń">${ic('trash')}</button><button class="round gl" data-reply="${m.id}" aria-label="${m.cat === 'drafts' ? 'Edytuj i wyślij' : 'Napisz ponownie'}">${ic(m.cat === 'drafts' ? 'pen' : 'send')}</button></span>` : `<span style="display:flex;gap:8px"><button class="round gl" data-org="${m.id}" aria-label="Porządkowanie: usuń, spam, zablokuj">${ic('more')}</button><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span>`}</div>
     <h1 class="subject">${esc(m.subject)}</h1>
-    <div class="meta"><div class="a ${hue(own ? m.to_addr : m.from_addr)}">${esc(initials(own ? m.to_addr : m.from_name))}</div><div class="w"><div class="n">${own ? `Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</div><div class="d mono">${own ? `z ${esc(m.account_email)}` : esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div><button class="round gl star" data-star="${m.id}" aria-pressed="${!!m.starred}" aria-label="Oznacz gwiazdką">${ic('star', m.starred ? 'on' : '')}</button></div>
+    <div class="meta"><div class="a ${hue(own ? m.to_addr : m.from_addr)}">${esc(initials(own ? (addrList(m.to_addr).map((a) => cn(a))[0] || m.to_addr) : dispName(m.from_addr, m.from_name)))}</div><div class="w"><div class="n">${own ? `Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : `<button type="button" class="ea nb" data-ea="${esc(m.from_addr)}" data-ean="${esc(m.from_name || '')}">${esc(dispName(m.from_addr, m.from_name))}</button>`}</div><div class="d mono">${own ? `z ${esc(m.account_email)}` : eaBtn(m.from_addr, m.from_name)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div><button class="round gl star" data-star="${m.id}" aria-pressed="${!!m.starred}" aria-label="Oznacz gwiazdką">${ic('star', m.starred ? 'on' : '')}</button></div>
+    ${own ? '' : recipLine('Do', m.to_addr)}${recipLine('Dw', m.cc_addr)}${own ? recipLine('Do', m.to_addr) : ''}
     ${m.cat && m.cat !== 'inbox' && !risky ? `<div class="fbanner gl"><div><b>${FOLDER_NAME[m.cat] || 'Poza skrzynką'}</b>${m.cat_why ? ` · ${esc(m.cat_why)}` : ''}</div><button class="btn" data-orgact="inbox" data-orgid="${m.id}">To nie ${m.cat === 'spam' ? 'spam' : 'oferta'}</button></div>` : ''}
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
     ${attHtml(m)}
     ${framed ? `<div class="mseg gl" role="group" aria-label="Widok wiadomości"><button data-mode="html" aria-pressed="${html}">Oryginał</button><button data-mode="text" aria-pressed="${!html}">Tekst</button></div>` : ''}
     ${html && m.images_blocked ? `<div class="fbanner gl"><div>Obrazki są wyłączone.</div><button class="btn" data-act="showimg" data-id="${m.id}">Pokaż obrazki</button></div>` : ''}
-    ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${linkify(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
-      : `<div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`}
+    ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${rich(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
+      : `<div class="body ${risky ? 'dim' : ''}" id="body">${rich(m.body)}</div>`}
     <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('send', 'i18')}Odpowiedz</button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">Odpowiedz wszystkim</button>` : ''}<button class="btn" data-cmp="forward">Przekaż dalej</button></div>
-    ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(String(t.to_addr || '').split(',')[0]) : esc(t.from_name || t.from_addr)} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
+    ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(toNames(String(t.to_addr || '').split(',')[0])) : esc(dispName(t.from_addr, t.from_name))} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
   S.cur = { m, items };
   if (html) mountFrame(m.frame);
   else if (m.html_pending && (cacheGet('mode') || 'html') !== 'text') {
@@ -535,7 +564,7 @@ async function composeSheet(opts = {}) {
   const mine = new Set(accs.map((a) => a.email.toLowerCase()));
   const uniq = (l) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
   const split = (v) => String(v || '').split(/[,;]\s*/);
-  let to = '', cc = '', subject = '', text = '', inReply = '', refs = '', fwd = 0, draftId = 0, accId = m?.account_id || S.account || accs[0].id;
+  let to = opts.to || '', cc = '', subject = '', text = '', inReply = '', refs = '', fwd = 0, draftId = 0, accId = m?.account_id || S.account || accs[0].id;
   const sig = S.sig ? `\n\n-- \n${S.sig}` : '';
   if (mode === 'reply' || mode === 'replyall') {
     to = m.from_addr; subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`; inReply = m.message_id || ''; refs = uniq([m.refs, m.message_id].filter(Boolean)).join(' ');
@@ -552,14 +581,16 @@ async function composeSheet(opts = {}) {
   const title = { new: 'Nowa wiadomość', reply: 'Odpowiedz', replyall: 'Odpowiedz wszystkim', forward: 'Przekaż dalej', draft: 'Szkic', again: 'Nowa wiadomość' }[mode];
   const total = () => files.reduce((n, f) => n + f.size, 0);
   sheet(`<h2>${title}</h2><form id="cf"><div class="fld"><label for="cfr">Z konta</label><select class="in" id="cfr">${accs.map((a) => `<option value="${a.id}" ${accId === a.id ? 'selected' : ''}>${esc(a.email)}</option>`).join('')}</select></div>
-    <div class="fld"><label for="cto">Do</label><input class="in" id="cto" type="text" inputmode="email" autocomplete="off" autocapitalize="off" value="${esc(to)}" placeholder="adres, adres"></div>
-    <div id="ccbox" ${cc ? '' : 'hidden'}><div class="fld"><label for="ccc">Dw</label><input class="in" id="ccc" inputmode="email" autocapitalize="off" value="${esc(cc)}"></div><div class="fld"><label for="cbc">UDW</label><input class="in" id="cbc" inputmode="email" autocapitalize="off"></div></div>
+    ${rcptHtml('cto', 'Do')}
+    <div id="ccbox" ${cc ? '' : 'hidden'}>${rcptHtml('ccc', 'Dw')}${rcptHtml('cbc', 'UDW')}</div>
     ${cc ? '' : '<button class="lnk" type="button" id="showcc">Dw / UDW</button>'}
     <div class="fld"><label for="csu">Temat</label><input class="in" id="csu" value="${esc(subject)}"></div>
     <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" rows="9">${esc(text)}</textarea></div>
     <div class="cfiles" id="cfiles"></div>
     <div class="err" id="err" role="alert"></div>
     <div class="actions cact" style="margin-top:12px"><label class="btn" style="cursor:pointer">${ic('clip', 'i18')}Załącznik<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Szkic</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
+    const R = { to: mountRcpt(sh, 'cto', to), cc: mountRcpt(sh, 'ccc', cc), bcc: mountRcpt(sh, 'cbc', '') };
+    if (!S.people) get('/api/contacts/people').then((r) => { S.people = r.people; }).catch(() => { S.people = []; });
     const ta = $('#ctx', sh); ta.setSelectionRange(0, 0); setTimeout(() => (mode === 'new' || mode === 'draft' || mode === 'again' ? $('#cto', sh) : ta).focus(), 450);
     const paintFiles = () => { $('#cfiles', sh).innerHTML = files.map((f, i) => `<span class="cfile gl">${ic('clip', 'i14')}<span>${esc(f.name)} · ${fmtSize(f.size)}</span><button type="button" data-rmf="${i}" aria-label="Usuń załącznik">${ic('x', 'i14')}</button></span>`).join(''); };
     $('#showcc', sh)?.addEventListener('click', (e) => { $('#ccbox', sh).hidden = false; e.currentTarget.remove(); $('#ccc', sh).focus(); });
@@ -574,7 +605,20 @@ async function composeSheet(opts = {}) {
     };
     // przy przekazywaniu serwer dołącza załączniki oryginału sam; pokazujemy to użytkownikowi
     if (fwd && m.attachments?.length) $('#cfiles', sh).insertAdjacentHTML('beforebegin', `<div class="wh" style="font-size:12px;margin-top:6px">Zostaną dołączone załączniki oryginału (${m.attachments.length}).</div>`);
-    const payload = () => ({ account_id: +$('#cfr', sh).value, to: $('#cto', sh).value, cc: $('#ccc', sh).value, bcc: $('#cbc', sh).value, subject: $('#csu', sh).value, text: ta.value, in_reply_to: inReply || undefined, references: refs || undefined, forward_of: fwd || undefined, attachments: files.map(({ name, type, data }) => ({ name, type, data })) });
+    const payload = () => ({ account_id: +$('#cfr', sh).value, to: R.to.get(), cc: R.cc.get(), bcc: R.bcc.get(), subject: $('#csu', sh).value, text: ta.value, in_reply_to: inReply || undefined, references: refs || undefined, forward_of: fwd || undefined, attachments: files.map(({ name, type, data }) => ({ name, type, data })) });
+    const snap = () => JSON.stringify([R.to.get(), R.cc.get(), R.bcc.get(), $('#csu', sh).value, ta.value]);
+    const initial = snap();
+    const dirty = () => snap() !== initial || files.length > 0;
+    S.sheetGuard = () => {
+      if (!dirty()) return true;
+      if ($('#cguard')) return false;
+      $('#sheet-root').insertAdjacentHTML('beforeend', `<div id="cguard" class="cguard"><div class="cg gl"><b>Zapisać szkic?</b><span>Wiadomość nie została wysłana.</span><div class="actions"><button class="btn pri grow" type="button" data-g="save">Zapisz szkic</button><button class="btn warn" type="button" data-g="drop">Odrzuć</button><button class="btn" type="button" data-g="back">Wróć</button></div></div></div>`);
+      $('#cguard').onclick = (e) => {
+        const g = e.target.closest('[data-g]')?.dataset.g; if (!g) return;
+        if (g === 'back') $('#cguard').remove(); else if (g === 'drop') closeSheet(); else { $('#cguard').remove(); $('#cdraft', sh).click(); }
+      };
+      return false;
+    };
     $('#cdraft', sh).onclick = async (ev) => {
       const b = ev.currentTarget; b.disabled = true; $('#err', sh).textContent = '';
       try { await post('/api/drafts', { ...payload(), replace_id: draftId || undefined }); closeSheet(); toast('Zapisano szkic'); if (location.hash.startsWith('#/m/') && draftId) go('#/'); else if (S.filter === 'drafts') route(); }
@@ -582,11 +626,171 @@ async function composeSheet(opts = {}) {
     };
     $('#cf', sh).onsubmit = async (ev) => {
       ev.preventDefault(); const b = ev.submitter; b.disabled = true; $('#err', sh).textContent = '';
-      if (!$('#cto', sh).value.trim() && !$('#ccc', sh).value.trim() && !$('#cbc', sh).value.trim()) { $('#err', sh).textContent = 'Podaj adresata'; b.disabled = false; return; }
+      if (!R.to.get() && !R.cc.get() && !R.bcc.get()) { $('#err', sh).textContent = 'Podaj adresata'; b.disabled = false; return; }
       try { await post('/api/send', { ...payload(), draft_id: draftId || undefined }); closeSheet(); toast('Wysłano'); if (draftId) go('#/'); }
       catch (e) { $('#err', sh).textContent = e.message; b.disabled = false; }
     };
   });
+}
+
+// ---- kontakty (własna książka adresowa; nic nie jest importowane z telefonu) ----
+S.contacts = []; S.cmap = new Map(); S.people = null;
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+const addrList = (s) => [...new Set((String(s || '').match(EMAIL_RE) || []).map((x) => x.toLowerCase()))];
+const cn = (a) => S.cmap.get(String(a || '').toLowerCase())?.name || '';
+const dispName = (a, n) => cn(a) || n || a || '';
+const toNames = (s) => addrList(s).map((a) => cn(a) || a).join(', ');
+async function loadContacts(quiet) {
+  try { S.contacts = (await get('/api/contacts')).contacts; } catch (e) { if (!quiet) throw e; }
+  S.cmap = new Map(); for (const c of S.contacts) for (const e of c.emails) S.cmap.set(e.email, c);
+}
+const eaBtn = (a, n = '') => `<button type="button" class="ea" data-ea="${esc(a)}" data-ean="${esc(n)}">${esc(a)}</button>`;
+const withMail = (h) => h.split(/(<a [^>]*>[^<]*<\/a>)/).map((p, i) => (i % 2 ? p : p.replace(EMAIL_RE, (a) => eaBtn(a)))).join('');
+const copyText = async (t) => { try { await navigator.clipboard.writeText(t); } catch { const x = document.createElement('textarea'); x.value = t; document.body.appendChild(x); x.select(); try { document.execCommand('copy'); } catch { /* brak */ } x.remove(); } toast('Skopiowano'); };
+function recipLine(label, s) {
+  const l = addrList(s); if (!l.length) return '';
+  return `<div class="rcl"><span class="mono">${label}</span>${l.map((a) => `<button type="button" class="ea rce" data-ea="${esc(a)}">${cn(a) ? `<b>${esc(cn(a))}</b><small>${esc(a)}</small>` : esc(a)}</button>`).join('')}</div>`;
+}
+
+// menu adresu e-mail: napisz / odpowiedz / dodaj lub edytuj kontakt / kopiuj / zablokuj
+function emailSheet(addr, { name = '', msg = null } = {}) {
+  addr = String(addr).trim().toLowerCase(); const c = S.cmap.get(addr);
+  const row = (act, ico, t, sub = '') => `<button class="org" data-eact="${act}"><span class="oi">${ic(ico, 'i18')}</span><span><b>${t}</b>${sub ? `<small>${sub}</small>` : ''}</span></button>`;
+  const fromHere = msg && String(msg.from_addr).toLowerCase() === addr && msg.cat !== 'sent' && msg.cat !== 'drafts';
+  sheet(`<div class="sheet-b"><h2 class="ser" style="font-size:28px;margin:6px 0 2px">${esc(c?.name || name || addr)}</h2><p style="color:var(--ink2);margin:0 0 8px;font-size:14px;word-break:break-all">${esc(addr)}${c ? ' · w kontaktach' : ''}</p>
+    ${fromHere ? row('reply', 'send', 'Odpowiedz', 'Na tę wiadomość') : ''}
+    ${row('new', 'pen', 'Napisz nową wiadomość')}
+    ${c ? row('edit', 'user', 'Edytuj kontakt', 'Zmień nazwę, adresy lub notatkę') : row('add', 'plus', 'Dodaj do kontaktów', 'Z własną nazwą')}
+    ${row('copy', 'clip', 'Kopiuj adres')}
+    ${fromHere ? row('block', 'ban', 'Zablokuj nadawcę', 'Nigdy więcej nie pokaże się w żadnej zakładce.') : ''}</div>`, (sh) => {
+    sh.addEventListener('click', async (e) => {
+      const a = e.target.closest('[data-eact]')?.dataset.eact; if (!a) return;
+      if (a === 'reply') composeSheet({ mode: 'reply', m: msg });
+      else if (a === 'new') composeSheet({ mode: 'new', to: addr });
+      else if (a === 'add') contactSheet(null, { email: addr, name: name && name !== addr ? name : '' });
+      else if (a === 'edit') contactSheet(c);
+      else if (a === 'copy') { closeSheet(); copyText(addr); }
+      else if (a === 'block') { await orgDo([msg.id], 'block'); go('#/'); }
+    });
+  });
+}
+
+function contactSheet(c, pre = {}) {
+  const emails = c ? c.emails.map((e) => e.email) : [pre.email || ''];
+  const erow = (v) => `<div class="kerow"><input class="in ke" type="email" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="adres@poczta.pl" value="${esc(v)}"><button type="button" class="kx" data-kx aria-label="Usuń adres">${ic('x', 'i14')}</button></div>`;
+  sheet(`<h2>${c ? 'Edytuj kontakt' : 'Nowy kontakt'}</h2><form id="kf"><div class="fld"><label for="kn">Nazwa</label><input class="in" id="kn" autocomplete="off" autocapitalize="words" placeholder="np. Michał Lewandowski" value="${esc(c?.name || pre.name || '')}"></div>
+    <div class="fld"><label>Adresy e-mail</label><div id="kem">${emails.map(erow).join('')}</div></div>
+    <button class="lnk" type="button" id="kadd" style="margin-top:6px">+ Dodaj kolejny adres</button>
+    <div class="fld"><label for="knote">Notatka</label><input class="in" id="knote" autocomplete="off" placeholder="opcjonalnie" value="${esc(c?.note || '')}"></div>
+    <div class="err" id="err" role="alert"></div>
+    <div class="actions" style="margin-top:12px">${c ? `<button class="btn warn" type="button" id="kdel">Usuń</button><button class="btn" type="button" id="kmail">${ic('send', 'i18')}Napisz</button>` : ''}<button class="btn pri grow" type="submit">Zapisz</button></div></form>`, (sh) => {
+    const box = $('#kem', sh);
+    const sync = () => box.querySelectorAll('.kx').forEach((b) => { b.hidden = box.children.length < 2; });
+    sync();
+    box.addEventListener('click', (e) => { const b = e.target.closest('[data-kx]'); if (b && box.children.length > 1) { b.parentElement.remove(); sync(); } });
+    $('#kadd', sh).onclick = () => { box.insertAdjacentHTML('beforeend', erow('')); sync(); box.lastElementChild.querySelector('input').focus(); };
+    if (!c) setTimeout(() => (pre.name || !pre.email ? $('#kn', sh) : $('#kn', sh)).focus(), 450);
+    $('#kmail', sh)?.addEventListener('click', () => composeSheet({ mode: 'new', to: c.emails[0].email }));
+    let armed = false;
+    $('#kdel', sh)?.addEventListener('click', async (e) => {
+      const b = e.currentTarget; if (!armed) { armed = true; b.textContent = 'Na pewno usunąć?'; setTimeout(() => { armed = false; b.textContent = 'Usuń'; }, 3000); return; }
+      try { await api('DELETE', `/api/contacts/${c.id}`); await loadContacts(true); closeSheet(); toast('Usunięto kontakt'); route(); } catch (er) { $('#err', sh).textContent = er.message; }
+    });
+    $('#kf', sh).onsubmit = async (ev) => {
+      ev.preventDefault(); const b = ev.submitter; b.disabled = true; $('#err', sh).textContent = '';
+      const list = [...box.querySelectorAll('.ke')].map((i) => i.value.trim()).filter(Boolean);
+      const labels = new Map((c?.emails || []).map((e) => [e.email, e.label]));
+      const body = { name: $('#kn', sh).value, note: $('#knote', sh).value, emails: list.map((email) => ({ email, label: labels.get(email.toLowerCase()) || '' })) };
+      try { await (c ? api('PUT', `/api/contacts/${c.id}`, body) : post('/api/contacts', body)); await loadContacts(true); closeSheet(); toast('Zapisano kontakt'); route(); }
+      catch (er) { $('#err', sh).textContent = er.message; b.disabled = false; }
+    };
+  });
+}
+
+async function viewContacts() {
+  await loadContacts();
+  const pplP = get('/api/contacts/people').then((r) => r.people).catch(() => []);
+  paint(`<div class="top" style="display:flex;align-items:center;justify-content:space-between"><span class="eyebrow mono" style="padding-left:8px">Kontakty</span><button class="round gl" data-kadd aria-label="Nowy kontakt">${ic('plus')}</button></div>
+    <label class="srch gl">${ic('search', 'i18')}<input id="kq" type="search" autocomplete="off" autocapitalize="off" placeholder="Szukaj w kontaktach"></label>
+    <div id="klist"></div>`);
+  nav('contacts');
+  let people = null, all = false, q = '';
+  const match = (s) => !q || s.toLowerCase().includes(q);
+  const draw = () => {
+    const cs = S.contacts.filter((c) => match(c.name) || match(c.note || '') || c.emails.some((e) => match(e.email)));
+    let out = '', last = '';
+    for (const c of cs) {
+      const L = (c.name[0] || '#').toLocaleUpperCase('pl'), g = /\p{L}/u.test(L) ? L : '#';
+      if (g !== last) { out += `<div class="sec">${esc(g)}</div>`; last = g; }
+      out += `<button class="crow gl" data-kc="${c.id}"><div class="a ${hue(c.emails[0]?.email || c.name)}">${esc(initials(c.name))}</div><div class="rb"><div class="nm"><span>${esc(c.name)}</span></div><div class="sn">${esc(c.emails.map((e) => e.email).join(' · '))}</div></div></button>`;
+    }
+    if (!cs.length) out = S.contacts.length ? `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego imienia lub adresu.</div>` : `<div class="empty"><div class="big ser">Brak kontaktów</div>Dodaj kogoś przyciskiem + u góry albo wybierz osobę z korespondencji poniżej.</div>`;
+    const ps = (people || []).filter((p) => match(p.email) || match(p.name || ''));
+    if (ps.length) {
+      out += `<div class="sec">Z korespondencji · jeszcze nie w kontaktach</div>` + (all || q ? ps : ps.slice(0, 6)).map((p) => `<button class="crow gl" data-kp="${esc(p.email)}" data-kpn="${esc(p.name || '')}"><div class="a ${hue(p.email)}">${esc(initials(p.name || p.email))}</div><div class="rb"><div class="nm"><span>${esc(p.name || p.email)}</span></div><div class="sn">${esc(p.name ? p.email : 'Dodaj i podpisz własną nazwą')}</div></div><span class="kplus">${ic('plus', 'i18')}</span></button>`).join('')
+        + (!all && !q && ps.length > 6 ? `<button class="btn" data-kmore style="margin:10px auto 0;display:flex">Pokaż więcej (${ps.length - 6})</button>` : '');
+    }
+    $('#klist').innerHTML = out;
+  };
+  draw();
+  pplP.then((p) => { people = p; if ($('#klist')) draw(); });
+  $('#kq').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
+  S.kmore = () => { all = true; draw(); };
+}
+
+// pole adresatów: kafelki (nazwa + adres) i autouzupełnianie z kontaktów oraz z korespondencji
+function rcptHtml(id, label, hidden) {
+  return `<div class="fld"><label for="${id}">${label}</label><div class="rf in" data-rf="${id}"><span class="rchips"></span><input id="${id}" class="ri" type="text" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="sug gl" hidden></div></div>`;
+}
+function mountRcpt(sh, id, initial) {
+  const box = $(`[data-rf="${id}"]`, sh), inp = $('input', box), sug = box.parentElement.querySelector('.sug'), chips = [];
+  const chipHtml = (a) => `<span class="rc" data-e="${esc(a)}">${cn(a) ? `<span class="rn"><b>${esc(cn(a))}</b><small>${esc(a)}</small></span>` : `<span class="rn">${esc(a)}</span>`}<button type="button" class="rx" data-rx="${esc(a)}" aria-label="Usuń adresata">${ic('x', 'i14')}</button></span>`;
+  const draw = () => { $('.rchips', box).innerHTML = chips.map(chipHtml).join(''); };
+  const add = (a) => { a = a.trim().toLowerCase(); if (a && !chips.includes(a)) { chips.push(a); draw(); } };
+  const hide = () => { sug.hidden = true; sug.innerHTML = ''; };
+  const take = () => { const m = inp.value.match(EMAIL_RE); if (m) { m.forEach(add); inp.value = ''; } hide(); return !!m; };
+  const cand = () => {
+    const out = []; for (const c of S.contacts) for (const e of c.emails) out.push({ name: c.name, email: e.email, own: true });
+    for (const p of S.people || []) out.push({ name: p.name || '', email: p.email, own: false }); return out;
+  };
+  const suggest = () => {
+    const q = inp.value.trim().toLowerCase(); if (!q) return hide();
+    const sc = (x) => { const n = x.name.toLowerCase(), e = x.email.toLowerCase(); if (n.split(/\s+/).some((w) => w.startsWith(q)) || n.startsWith(q)) return 0; if (e.startsWith(q)) return 1; if (n.includes(q) || e.includes(q)) return 2; return 9; };
+    const l = cand().filter((x) => !chips.includes(x.email) && sc(x) < 9).sort((a, b) => sc(a) - sc(b) || (b.own - a.own)).slice(0, 6);
+    if (!l.length) return hide();
+    sug.innerHTML = l.map((x) => `<button type="button" class="sg" data-e="${esc(x.email)}"><b>${esc(x.name || x.email)}</b><small>${x.name ? esc(x.email) : 'z korespondencji'}${x.name && !x.own ? ' · z korespondencji' : ''}</small></button>`).join(''); sug.hidden = false;
+  };
+  sug.addEventListener('pointerdown', (e) => { const b = e.target.closest('.sg'); if (!b) return; e.preventDefault(); add(b.dataset.e); inp.value = ''; hide(); inp.focus(); });
+  box.addEventListener('click', (e) => { const x = e.target.closest('[data-rx]'); if (x) { const i = chips.indexOf(x.dataset.rx); if (i >= 0) { chips.splice(i, 1); draw(); } inp.focus(); } else inp.focus(); });
+  inp.addEventListener('input', () => {
+    const v = inp.value;
+    if (/[,;]/.test(v)) { const parts = v.split(/[,;]/); const last = parts.pop(); parts.forEach((p) => (p.match(EMAIL_RE) || []).forEach(add)); inp.value = last.trimStart(); }
+    else if (/^\S+@\S+\.\S+\s$/.test(v)) take();
+    suggest();
+  });
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); const f = sug.querySelector('.sg'); if (!sug.hidden && f && !inp.value.includes('@')) { add(f.dataset.e); inp.value = ''; hide(); } else take(); }
+    else if (e.key === 'Backspace' && !inp.value && chips.length) { chips.pop(); draw(); }
+  });
+  inp.addEventListener('blur', () => setTimeout(() => { take(); }, 120));
+  addrList(initial).forEach(add);
+  return { get: () => [...chips, ...(inp.value.trim() ? [inp.value.trim()] : [])].join(', '), focus: () => inp.focus() };
+}
+// w treści oryginału: adresy e-mail i linki mailto: otwierają menu adresu
+function hookFrameMail(d) {
+  try {
+    d.addEventListener('click', (e) => {
+      const a = e.target.closest?.('a[href^="mailto:" i]'); if (!a) return;
+      e.preventDefault(); const ad = decodeURIComponent(a.getAttribute('href').slice(7).split('?')[0]).split(',')[0].trim(); if (ad) emailSheet(ad, { msg: S.cur?.m });
+    }, true);
+    const w = d.createTreeWalker(d.body, 4, null); const nodes = []; let n, k = 0;
+    while ((n = w.nextNode()) && k++ < 3000) { const p = n.parentElement; if (p && !/^(A|SCRIPT|STYLE|TEXTAREA|TITLE)$/i.test(p.tagName) && n.nodeValue.includes('@') && /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}/.test(n.nodeValue)) nodes.push(n); if (nodes.length > 300) break; }
+    for (const t of nodes) {
+      const s = t.nodeValue, frag = d.createDocumentFragment(); let i = 0, m; EMAIL_RE.lastIndex = 0;
+      while ((m = EMAIL_RE.exec(s))) { if (m.index > i) frag.append(s.slice(i, m.index)); const a = d.createElement('a'); a.href = 'mailto:' + m[0]; a.textContent = m[0]; frag.append(a); i = m.index + m[0].length; }
+      if (i < s.length) frag.append(s.slice(i)); t.replaceWith(frag);
+    }
+  } catch { /* iframe niedostępny */ }
 }
 
 // ---- nawigacja, zdarzenia ----
@@ -600,7 +804,7 @@ async function route() {
   if (!S.user) { if (!h.startsWith('#/join/') && h !== '#/login') { history.replaceState(null, '', '#/login'); } return viewAuth(); }
   try {
     const mm = h.match(/^#\/m\/(\d+)/);
-    if (mm) await viewMessage(+mm[1]); else if (h === '#/today') await viewToday(); else if (h === '#/search') await viewSearch(); else if (h === '#/accounts') await viewAccounts(); else if (h === '#/login') go('#/'); else await viewInbox();
+    if (mm) await viewMessage(+mm[1]); else if (h === '#/today') await viewToday(); else if (h === '#/search') await viewSearch(); else if (h === '#/contacts') await viewContacts(); else if (h === '#/accounts') await viewAccounts(); else if (h === '#/login') go('#/'); else await viewInbox();
   } catch (e) { if (my === routing && e.status !== 401) paint(`<div class="empty"><div class="big ser">Coś poszło nie tak</div>${esc(e.message)}<div class="actions" style="justify-content:center"><button class="btn" data-act="retry">Spróbuj ponownie</button></div></div>`); }
   view().scrollTo?.(0, 0);
 }
@@ -608,11 +812,16 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
     else if (d.go) go(d.go);
+    else if (d.ea) emailSheet(d.ea, { name: d.ean || '', msg: /^#\/m\//.test(location.hash) ? S.cur?.m : null });
+    else if (d.kc) contactSheet(S.contacts.find((c) => c.id === +d.kc));
+    else if (d.kp) contactSheet(null, { email: d.kp, name: d.kpn });
+    else if (d.kadd !== undefined) contactSheet(null);
+    else if (d.kmore !== undefined) S.kmore?.();
     else if (d.tab) go(d.tab === 'inbox' ? '#/' : `#/${d.tab}`);
     else if (d.seg) { S.seg = d.seg; S.animate = false; route(); }
     else if (d.filter) { S.filter = d.filter; route(); }
@@ -743,6 +952,7 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   try { const s = await get('/api/state'); S.user = s.user; S.setupNeeded = s.setupNeeded; S.demoAllowed = s.demoAllowed; }
   catch { S.user = cacheGet('inbox') ? { email: 'offline' } : null; S.offline = true; }
+  if (S.user && !S.offline) await Promise.race([loadContacts(true), new Promise((r) => setTimeout(r, 800))]);
   route(); pushHeal();
   if (S.user && 'EventSource' in window) {
     const es = new EventSource('api/events');
@@ -752,4 +962,4 @@ async function boot() {
 }
 boot();
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') requestClose(); });

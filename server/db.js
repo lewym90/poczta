@@ -84,6 +84,15 @@ const MIGRATIONS = [
    ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
    CREATE INDEX msg_thread ON messages(user_id, account_id, thread_key);
    CREATE INDEX msg_star ON messages(user_id, starred);`,
+  `CREATE TABLE contacts(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX contacts_user ON contacts(user_id, name);
+   CREATE TABLE contact_emails(
+     id INTEGER PRIMARY KEY, contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, label TEXT,
+     UNIQUE(user_id, email));
+   CREATE INDEX cemail_contact ON contact_emails(contact_id);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

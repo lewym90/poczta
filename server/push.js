@@ -57,12 +57,17 @@ export function inQuiet(quiet, now = new Date()) {
   return a <= b ? t >= a && t < b : t >= a || t < b; // zakres może przechodzić przez północ
 }
 
+// nazwa nadawcy z Twoich kontaktów (jeśli jest), inaczej to, co podał nadawca
+export const contactName = (userId, addr, fallback) => {
+  const r = db.prepare('SELECT c.name FROM contact_emails e JOIN contacts c ON c.id=e.contact_id WHERE e.user_id=? AND e.email=?').get(userId, String(addr || '').toLowerCase());
+  return r?.name || fallback;
+};
 const hhmm = (s) => (s.includes('T') ? s.slice(11, 16) : '');
 export async function notifyNewMessages(userId, fresh) {
   const prefs = getPrefs(userId);
   if (inQuiet(prefs.quiet)) return;
   const muted = new Set(db.prepare('SELECT id FROM accounts WHERE user_id=? AND notify=0').all(userId).map((r) => r.id));
-  fresh = fresh.filter((f) => !muted.has(f.account_id) && !(prefs.mode === 'important' && !f.items.length));
+  fresh = fresh.map((f) => ({ ...f, fromName: contactName(userId, f.fromAddr, f.fromName) })).filter((f) => !muted.has(f.account_id) && !(prefs.mode === 'important' && !f.items.length));
   if (!fresh.length) return;
   if (fresh.length > 3) return void (await sendToUser(userId, { title: `${fresh.length} nowych wiadomości`, body: fresh.slice(0, 3).map((f) => f.fromName).join(', ') + '…', url: './#/', tag: 'batch' }));
   for (const f of fresh) {

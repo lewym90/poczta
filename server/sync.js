@@ -70,7 +70,7 @@ export function storeMessages(acc, messages) {
       if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
       if (sorted.cat !== 'inbox') continue; // oferty i spam: bez powiadomień i bez wykrywania spraw
-      if (m.unread) fresh.push({ id, account_id: acc.id, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
+      if (m.unread) fresh.push({ id, account_id: acc.id, fromAddr: m.fromAddr, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
       for (const it of extractItems({ subject: m.subject, body: m.body, fromName: m.fromName, ics: m.ics, received: new Date(m.date) })) {
         const x = insI.run(acc.user_id, id, it.kind, it.title, it.starts_at, it.ends_at, it.all_day, it.amount ?? null, it.currency ?? null, it.location ?? null, it.confidence, it.source, it.evidence, Date.now());
         items += Number(x.changes);

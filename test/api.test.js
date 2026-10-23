@@ -436,3 +436,30 @@ test('gwiazdki, archiwum, cofnięcie spamu usuwa regułę, wątki, foldery dosta
   const lst = (await api('GET', `/api/messages?tab=other&folder=${encodeURIComponent('X:Praca')}&account=${Number(ia.lastInsertRowid)}`)).body.messages; assert.equal(lst.length, 1);
   assert.ok(!(await api('GET', '/api/messages?tab=all')).body.messages.some((x) => x.subject === 'Z folderu Praca'));
 });
+
+test('kontakty: dodawanie z wieloma adresami, duplikat adresu odrzucony, edycja, usuwanie, osoby z korespondencji, nazwa w powiadomieniach, izolacja użytkowników', async () => {
+  const { contactName } = await import('../server/push.js');
+  const { db } = await import('../server/db.js');
+  const c = await api('POST', '/api/contacts', { name: 'Michał Lewandowski', note: 'brat', emails: [{ email: 'Michal@Example.com', label: 'prywatny' }, { email: 'm.lewandowski@firma.pl', label: 'praca' }] });
+  assert.equal(c.status, 200);
+  let list = (await api('GET', '/api/contacts')).body.contacts; const mine = list.find((x) => x.name === 'Michał Lewandowski');
+  assert.deepEqual(mine.emails.map((e) => e.email), ['michal@example.com', 'm.lewandowski@firma.pl']);
+  const dup = await api('POST', '/api/contacts', { name: 'Ktoś', emails: [{ email: 'michal@example.com' }] }); assert.equal(dup.status, 409); assert.match(dup.body.error, /Michał Lewandowski/);
+  assert.equal((await api('POST', '/api/contacts', { name: 'Zły', emails: [{ email: 'to-nie-adres' }] })).status, 400);
+  assert.equal((await api('POST', '/api/contacts', { name: 'Brak', emails: [] })).status, 400);
+  assert.equal((await api('PUT', `/api/contacts/${mine.id}`, { name: 'Michał L.', emails: [{ email: 'michal@example.com' }] })).status, 200); // zmiana nie liczy się jako duplikat samego siebie
+  list = (await api('GET', '/api/contacts')).body.contacts; assert.equal(list.find((x) => x.id === mine.id).emails.length, 1);
+  const uid = db.prepare('SELECT user_id u FROM contacts WHERE id=?').get(mine.id).u;
+  assert.equal(contactName(uid, 'MICHAL@example.com', 'Obcy'), 'Michał L.'); assert.equal(contactName(uid, 'nikt@example.com', 'Obcy'), 'Obcy');
+  const people = (await api('GET', '/api/contacts/people')).body.people; assert.ok(Array.isArray(people)); assert.ok(!people.some((p) => p.email === 'michal@example.com'));
+  assert.ok(people.some((p) => p.email === 'marta@example.com'), 'nadawcy z poczty są podpowiadani');
+  // inny użytkownik nie widzi i nie rusza cudzych kontaktów
+  const { hashPassword, createSession } = await import('../server/security.js');
+  const other = Number(db.prepare("INSERT INTO users(email,pass_hash,plan,created_at) VALUES('kontakty@example.com',?,'guest',?)").run(hashPassword('xxxxxxxxxxxxxx'), Date.now()).lastInsertRowid);
+  const saved = cookie; cookie = `sid=${createSession(other, 't')}`;
+  assert.equal((await api('GET', '/api/contacts')).body.contacts.length, 0);
+  assert.equal((await api('PUT', `/api/contacts/${mine.id}`, { name: 'x', emails: [{ email: 'x@example.com' }] })).status, 404);
+  await api('DELETE', `/api/contacts/${mine.id}`); cookie = saved;
+  assert.ok((await api('GET', '/api/contacts')).body.contacts.some((x) => x.id === mine.id));
+  assert.equal((await api('DELETE', `/api/contacts/${mine.id}`)).status, 200); assert.ok(!(await api('GET', '/api/contacts')).body.contacts.some((x) => x.id === mine.id));
+});

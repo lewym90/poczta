@@ -25,7 +25,7 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:'Instrument Sans',-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overscroll-behavior:none}
-body{position:fixed;inset:0;overflow:hidden}
+body{position:relative;min-height:100%}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;touch-action:manipulation}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
 a{color:inherit}
@@ -221,3 +221,40 @@ textarea.in{min-height:150px;resize:vertical;line-height:23px}
 #prog.on{opacity:1;animation:prog 1.1s linear infinite}@keyframes prog{from{background-position:-40% 0}to{background-position:140% 0}}
 .cact .btn{white-space:nowrap}.cact .btn.pri{min-width:112px}
 @media (prefers-reduced-motion:reduce){#prog.on{animation:none;background-size:100% 100%}}
+
+/* iOS (ekran początkowy) skraca okno o ~62 pt, jeśli sam dokument nie jest przewijalny. Niewidoczny dystans czyni go przewijalnym; interfejs (position: fixed) i tak się nie rusza (tak samo jak w Kalendarzu). */
+#docspacer{position:absolute;top:0;left:0;width:1px;height:calc(100vh + 120px);visibility:hidden;pointer-events:none}
+html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
+
+.grab{padding:0;height:5px;position:relative}.grab::after{content:'';position:absolute;left:-60px;right:-60px;top:-12px;bottom:-14px}
+.sx{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.08);color:var(--ink2);z-index:2}
+.sheet{overscroll-behavior:contain}
+.cguard{position:fixed;inset:0;z-index:30;display:flex;align-items:flex-end;justify-content:center;padding:16px 16px calc(var(--sab) + 16px);background:rgba(2,4,9,.55)}.cg{max-width:520px}
+.cg{width:100%;padding:16px;border-radius:24px;display:flex;flex-direction:column;gap:6px;background:#121a2b}.cg b{font-size:17px}.cg span{color:var(--ink2);font-size:14px}.cg .actions{flex-wrap:wrap;margin-top:10px}
+
+/* kontakty, adresy, pole adresatów */
+.ea{display:inline;padding:0;margin:0;background:none;border:0;color:var(--acc2);font:inherit;text-align:left;word-break:break-all;text-decoration:underline;text-decoration-color:rgba(140,160,255,.4);text-underline-offset:3px;cursor:pointer}
+.ea.nb{color:var(--ink);text-decoration:none;font-weight:inherit;word-break:normal}
+.rcl{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin:2px 0 10px;font-size:13px;color:var(--ink2)}
+.rcl>.mono{font-size:11px;letter-spacing:.1em;text-transform:uppercase;min-width:22px}
+.rce b{font-weight:600;color:var(--ink);margin-right:6px;text-decoration:none}.rce small{font-size:12px;color:var(--ink2)}
+.crow{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 14px;border-radius:20px;margin-top:8px}
+.crow .a{flex:none}.crow .rb{flex:1;min-width:0}.crow .nm{font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow .sn{font-size:13px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.kplus{flex:none;color:var(--acc2);display:flex}
+#klist .sec{margin-top:18px}
+.kerow{display:flex;gap:8px;align-items:center;margin-top:8px}.kerow:first-child{margin-top:0}.kerow .in{flex:1}
+.kx{flex:none;width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;color:var(--ink2);background:var(--g1)}
+.rf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;cursor:text}
+.rchips{display:contents}
+.rf .ri{flex:1;min-width:120px;background:none;border:0;outline:0;color:var(--ink);font:inherit;font-size:16px;padding:6px 4px}
+.rc{display:inline-flex;align-items:center;gap:2px;max-width:100%;padding:4px 4px 4px 12px;border-radius:18px;background:rgba(120,140,255,.16);border:1px solid rgba(140,160,255,.28)}
+.rc .rn{display:flex;flex-direction:column;min-width:0;font-size:14px;line-height:17px;overflow:hidden}
+.rc .rn b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rc .rn small{font-size:11.500px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rx{flex:none;width:30px;height:30px;border-radius:15px;display:flex;align-items:center;justify-content:center;color:var(--ink2)}
+.sug{margin-top:6px;border-radius:16px;overflow:hidden}
+.sg{display:flex;flex-direction:column;align-items:flex-start;width:100%;text-align:left;padding:10px 14px;border-bottom:1px solid var(--gl)}.sg:last-child{border-bottom:0}
+.sg b{font-size:15px;font-weight:600}.sg small{font-size:12px;color:var(--ink2);word-break:break-all}
+.tab{min-width:0;font-size:10.500px}
+.crow .a{width:46px;height:46px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.rcl{padding-left:4px}

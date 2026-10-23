@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import { db, audit } from './db.js';
+import { db, tx, audit } from './db.js';
 import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, destroySession, rateLimit } from './security.js';
 import { openFolder, loadOlder, folderPath, syncFolders, providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
 import { moveTo, star, mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
@@ -302,6 +302,51 @@ route('POST', '/api/messages/act', (ctx) => {
   }
   let done; try { done = mark(ctx.user.id, ids, action, ctx.body.scope === 'domain' ? 'domain' : 'sender'); } catch (e) { bad(e.message); }
   return { ok: true, ids: done, count: done.length };
+});
+// ---- kontakty (osobne dla każdej osoby; nic nie jest importowane z telefonu) ----
+const normEmail = (e) => String(e || '').trim().toLowerCase();
+function readContacts(uid) {
+  const cs = db.prepare('SELECT id,name,note,created_at FROM contacts WHERE user_id=? ORDER BY name COLLATE NOCASE LIMIT 5000').all(uid);
+  const by = new Map();
+  for (const e of db.prepare('SELECT contact_id,email,label FROM contact_emails WHERE user_id=? ORDER BY id').all(uid)) { if (!by.has(e.contact_id)) by.set(e.contact_id, []); by.get(e.contact_id).push({ email: e.email, label: e.label || '' }); }
+  return cs.map((c) => ({ ...c, emails: by.get(c.id) || [] }));
+}
+function saveContact(uid, id, body) {
+  const name = String(body.name || '').trim().slice(0, 100);
+  const emails = [...new Map((Array.isArray(body.emails) ? body.emails : []).slice(0, 10).map((e) => [normEmail(e.email), { email: normEmail(e.email), label: String(e.label || '').slice(0, 30) }])).values()].filter((e) => e.email);
+  if (!emails.length) bad('Podaj co najmniej jeden adres e-mail');
+  if (!emails.every((e) => isEmail(e.email))) bad('Niepoprawny adres e-mail');
+  const nm = name || emails[0].email.split('@')[0];
+  for (const e of emails) {
+    const dup = db.prepare('SELECT c.id,c.name FROM contact_emails x JOIN contacts c ON c.id=x.contact_id WHERE x.user_id=? AND x.email=?').get(uid, e.email);
+    if (dup && dup.id !== id) bad(`Adres ${e.email} należy już do kontaktu „${dup.name}”`, 409);
+  }
+  return tx(() => {
+    const now = Date.now();
+    if (id) { db.prepare('UPDATE contacts SET name=?, note=?, updated_at=? WHERE id=? AND user_id=?').run(nm, String(body.note || '').slice(0, 500), now, id, uid); db.prepare('DELETE FROM contact_emails WHERE contact_id=?').run(id); }
+    else id = Number(db.prepare('INSERT INTO contacts(user_id,name,note,created_at,updated_at) VALUES(?,?,?,?,?)').run(uid, nm, String(body.note || '').slice(0, 500), now, now).lastInsertRowid);
+    for (const e of emails) db.prepare('INSERT INTO contact_emails(contact_id,user_id,email,label) VALUES(?,?,?,?)').run(id, uid, e.email, e.label || null);
+    return id;
+  });
+}
+route('GET', '/api/contacts', (ctx) => ({ contacts: readContacts(ctx.user.id) }));
+route('POST', '/api/contacts', (ctx) => {
+  if (db.prepare('SELECT COUNT(*) n FROM contacts WHERE user_id=?').get(ctx.user.id).n >= 5000) bad('Limit 5000 kontaktów');
+  const id = saveContact(ctx.user.id, 0, ctx.body); audit(ctx.user.id, 'contact_added', ''); return { ok: true, id };
+});
+route('PUT', '/api/contacts/:id', (ctx) => {
+  const id = +ctx.params.id; db.prepare('SELECT id FROM contacts WHERE id=? AND user_id=?').get(id, ctx.user.id) || bad('Nie ma takiego kontaktu', 404);
+  saveContact(ctx.user.id, id, ctx.body); return { ok: true, id };
+});
+route('DELETE', '/api/contacts/:id', (ctx) => { db.prepare('DELETE FROM contacts WHERE id=? AND user_id=?').run(+ctx.params.id, ctx.user.id); return { ok: true }; });
+// osoby z korespondencji, których nie ma w kontaktach (podpowiedzi i "Dodaj")
+route('GET', '/api/contacts/people', (ctx) => {
+  const uid = ctx.user.id, mine = new Set(db.prepare('SELECT lower(email) e FROM accounts WHERE user_id=?').all(uid).map((r) => r.e)), known = new Set(db.prepare('SELECT email FROM contact_emails WHERE user_id=?').all(uid).map((r) => r.email));
+  const out = new Map();
+  const bump = (a, n, when, w = 1) => { a = normEmail(a); if (!a || mine.has(a) || known.has(a) || !isEmail(a) || /no-?reply|noreply|donotreply|mailer-daemon/i.test(a)) return; const o = out.get(a) || { email: a, name: '', count: 0, last: 0 }; o.count += w; o.last = Math.max(o.last, when); if (n && !o.name) o.name = n; out.set(a, o); };
+  for (const r of db.prepare("SELECT from_addr a, MAX(from_name) n, COUNT(*) c, MAX(date) d FROM messages WHERE user_id=? AND cat IN ('inbox','archive') AND from_addr!='' GROUP BY lower(from_addr) ORDER BY c DESC LIMIT 400").all(uid)) bump(r.a, r.n, r.d, r.c);
+  for (const r of db.prepare("SELECT to_addr, date FROM messages WHERE user_id=? AND cat='sent' ORDER BY date DESC LIMIT 600").all(uid)) for (const a of String(r.to_addr || '').split(/[,;]\s*/)) bump(a, '', r.date, 3); // do kogo pisałeś liczy się mocniej
+  return { people: [...out.values()].sort((x, y) => y.count - x.count || y.last - x.last).slice(0, 300) };
 });
 // przeglądanie innych folderów dostawcy (etykiety, archiwum itp.)
 const folderCache = new Map();

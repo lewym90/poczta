@@ -115,6 +115,12 @@ function paint(html, { tabs = true, fab = false } = {}) {
 }
 const ringSvg = (cls) => `<svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="3"/><circle class="rg ${cls}" cx="26" cy="26" r="24" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="151" transform="rotate(-90 26 26)"/></svg>`;
 
+// znacznik skrzynki przy wiadomości (tylko gdy skrzynek jest więcej i nie filtrujemy po jednej)
+function accTag(m) {
+  if ((S.accounts || []).length < 2 || S.account) return '';
+  const i = S.accounts.findIndex((a) => a.id === m.account_id); if (i < 0) return '';
+  return `<div class="at mono"><span class="ad g${i % 5}"></span>${esc(S.accounts[i].label || S.accounts[i].email)}</div>`;
+}
 function msgRow(m, i) {
   const it = m.items.find((x) => x.status === 'new') || m.items[0];
   const snz = m.snoozed_until > Date.now() ? `<span class="cp snz">${ic('clock', 'i14')}Wraca ${esc(snzLabel(new Date(m.snoozed_until)))}</span>` : '';
@@ -123,7 +129,7 @@ function msgRow(m, i) {
   return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div></div>
     <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${fmtTime(m.date)}</span></div>
-    <div class="sj">${esc(m.subject)}</div>${chip ? `<div class="chiprow">${chip}</div>` : `<div class="sn">${esc(m.snippet)}</div>`}</div></button>`;
+    <div class="sj">${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : `<div class="sn">${esc(m.snippet)}</div>`}</div></button>`;
 }
 
 function heroHtml(t) {

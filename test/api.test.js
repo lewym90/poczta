@@ -564,3 +564,22 @@ test('przypomnienie o terminie płatności: raz, od 9:00, tylko dla otwartych', 
   assert.equal(rem(a), 1); assert.equal(rem(b), 0); assert.equal(rem(c), 0); assert.equal(remindDeadlines(noon), 0, 'tylko raz');
   if (old === undefined) delete process.env.POCZTA_TZ; else process.env.POCZTA_TZ = old;
 });
+
+test('stosy: Spam, Oferty i Kosz grupują po nadawcy, rozsunięcie zwraca członków od najnowszego, gest dotyczy całego stosu', async () => {
+  const { db } = await import('../server/db.js');
+  const acc = db.prepare("SELECT id,user_id FROM accounts WHERE provider='demo' ORDER BY id LIMIT 1").get(); const T = Date.now() - 3600e3;
+  const ins = db.prepare("INSERT INTO messages(user_id,account_id,folder,uid,message_id,from_name,from_addr,to_addr,subject,snippet,body,date,unread,cat,created_at,html_try,att_try,thread_key) VALUES(?,?,'INBOX',?,?,?,?,?,?,?,?,?,?,'spam',?,2,1,'')");
+  for (let i = 0; i < 4; i++) ins.run(acc.user_id, acc.id, 9600 + i, `<s${i}@t>`, 'InPost', 'powiadomienia@inpost.example', 'ty@example.com', `Paczka ${i}`, 'x', 'x', T + i * 1000, i === 0 ? 1 : 0, Date.now());
+  ins.run(acc.user_id, acc.id, 9610, '<s9@t>', 'Inny', 'inny@spam.example', 'ty@example.com', 'Inny spam', 'x', 'x', T, 0, Date.now());
+  const list = (await api('GET', '/api/messages?tab=spam&limit=100')).body.messages;
+  const inpost = list.filter((m) => m.from_addr === 'powiadomienia@inpost.example'); assert.equal(inpost.length, 1); assert.equal(inpost[0].thread_n, 4); assert.equal(inpost[0].subject, 'Paczka 3'); assert.equal(inpost[0].unread, true, 'stos jest nieprzeczytany, gdy któraś wiadomość jest');
+  assert.equal(list.filter((m) => m.from_addr === 'inny@spam.example')[0].thread_n, 1);
+  const st = (await api('GET', `/api/messages/${inpost[0].id}/stack?limit=2`)).body; assert.deepEqual(st.messages.map((m) => m.subject), ['Paczka 3', 'Paczka 2']); assert.equal(st.more, true);
+  const st2 = (await api('GET', `/api/messages/${inpost[0].id}/stack?limit=10&before=${st.messages[1].date}`)).body; assert.deepEqual(st2.messages.map((m) => m.subject), ['Paczka 1', 'Paczka 0']); assert.equal(st2.more, false);
+  // gest na stosie: wszystkie od nadawcy do kosza; w koszu to znowu jeden stos
+  const del = await api('POST', '/api/messages/act', { ids: [inpost[0].id], action: 'delete', thread: true }); assert.equal(del.body.count, 4);
+  const trash = (await api('GET', '/api/messages?tab=trash&limit=100')).body.messages.filter((m) => m.from_addr === 'powiadomienia@inpost.example'); assert.equal(trash.length, 1); assert.equal(trash[0].thread_n, 4);
+  assert.equal((await api('GET', `/api/messages/${trash[0].id}/stack`)).body.messages.length, 4);
+  await api('POST', '/api/messages/act', { ids: del.body.ids, action: 'restore' });
+  assert.equal((await api('GET', '/api/messages/999999/stack')).status, 404);
+});

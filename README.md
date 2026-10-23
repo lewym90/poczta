@@ -110,3 +110,7 @@ Zakładka **Kontakty** na dolnym pasku to własna książka adresowa każdej oso
 - **Wyszukiwanie z operatorami:** `od:`, `do:`, `ma:załącznik`, `jest:nieprzeczytane`, `jest:gwiazdka`, `w:wysłane|archiwum|wszystko`, a także zapisane wyszukiwania (inteligentne foldery).
 - **Sprawy:** filtry Wydarzenia, Terminy, Paczki.
 - **Przypomnienia o terminach płatności** (push): raz, dzień przed i w dniu terminu, od 9:00, poza ciszą nocną.
+
+## Stosy kart (etap 8)
+
+Zwinięte grupy wyglądają jak stos kart: główna karta z cienkimi warstwami wystającymi zza niej (2 wiadomości → 1 warstwa, 3 → 2, 4–5 → 3, 6+ → „gruby stos” z czterema warstwami, cieniem i znaczkiem ×N). Dotyk rozsuwa stos w miejscu (najnowsze pierwsze, 10 sztuk + „Pokaż więcej”), dotyk nagłówka zwija. W Spamie, Ofertach i Koszu grupuje sam adres nadawcy (bez okna czasu); w skrzynce, Wysłanych i Archiwum – rozmowy. Przesunięcie zwiniętego stosu działa na cały stos (z Cofnij), na karcie wewnątrz – na jedną wiadomość. Endpoint: `GET /api/messages/:id/stack?limit&before`.

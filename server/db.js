@@ -97,6 +97,7 @@ const MIGRATIONS = [
      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, PRIMARY KEY(user_id, email));`,
   // nowe zasady rozmów (nagłówki + temat + druga strona): klucze liczone od nowa w tle
   `UPDATE messages SET thread_key=NULL;`,
+  `CREATE INDEX msg_sender ON messages(user_id, cat, from_addr, date);`,
   `ALTER TABLE messages ADD COLUMN unsub TEXT;
    ALTER TABLE messages ADD COLUMN follow_off INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE found_items ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0;

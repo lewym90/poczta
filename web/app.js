@@ -161,15 +161,16 @@ function accTag(m) {
   const i = S.accounts.findIndex((a) => a.id === m.account_id); if (i < 0) return '';
   return `<div class="at mono"><span class="ad g${i % 5}"></span>${esc(S.accounts[i].label || S.accounts[i].email)}</div>`;
 }
-function msgRow(m, i) {
+function msgRow(m, i, o = {}) {
+  if (Array.isArray(o)) o = {}; // wywołanie przez .map(msgRow)
   const it = m.items.find((x) => x.status === 'new') || m.items[0];
   const snz = m.snoozed_until > Date.now() ? `<span class="cp snz">${ic('clock', 'i14')}Wraca ${esc(snzLabel(new Date(m.snoozed_until)))}</span>` : '';
   const why = !snz && m.cat && m.cat !== 'inbox' && m.cat_why && m.risk < 2 ? `<span class="cp snz">${ic('tag', 'i14')}${esc(m.cat_why)}</span>` : '';
   const chip = snz || why || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
-  return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" data-tn="${m.thread_n || 0}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
+  return `<button class="row gl ${m.unread ? 'unread' : ''}${o.sub ? ' csub' : ''}" style="--i:${i}" data-open="${m.id}" data-tn="${o.sub ? 0 : m.thread_n || 0}"${o.stack ? ` data-stk="${m.id}"` : ''} aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_addr)}">${esc(initials(m.cat === 'sent' || m.cat === 'drafts' ? (addrList(m.to_addr).map((a) => cn(a))[0] || m.to_addr) : dispName(m.from_addr, m.from_name)))}</div></div>
-    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : esc(dispName(m.from_addr, m.from_name))}</span></span><span class="tm mono">${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
-    <div class="sj">${m.thread_n > 1 ? `<span class="thn mono">${m.thread_n}</span>` : ''}${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : ''}</div></button>`;
+    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : esc(dispName(m.from_addr, m.from_name))}</span></span><span class="tm mono">${o.stack ? `<b class="xn">×${o.stack}</b>` : ''}${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
+    <div class="sj">${m.thread_n > 1 && !o.stack && !o.sub ? `<span class="thn mono">${m.thread_n}</span>` : ''}${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : ''}</div></button>`;
 }
 
 function heroHtml(t) {
@@ -200,7 +201,7 @@ async function viewInbox() {
   else if (S.seg === 'cases') body = casesHtml(pend);
   else if (S.seg === 'pay') body = pay ? payHtml(pay) : '<div class="empty">Płatności są dostępne online.</div>';
   else body = `<div class="chips" role="group" aria-label="Foldery i filtry">${chipsHtml(msgs.counts)}</div>
-    ${bulkHtml(msgs)}<div class="list">${msgs.messages.length ? msgs.messages.map(msgRow).join('') : emptyFolderHtml()}</div>${moreHtml(msgs)}`;
+    ${bulkHtml(msgs)}<div class="list">${msgs.messages.length ? msgs.messages.map(stackRow).join('') : emptyFolderHtml()}</div>${moreHtml(msgs)}`;
   const found = pend.length && S.seg === 'msg' ? `<button class="found" data-seg="cases" style="--i:2" aria-label="Przejrzyj wykryte sprawy"><span class="spin"></span><span class="in"><span class="ico">${ic('spark', 'i18')}</span><span class="tx">Poczta znalazła ${ev ? `${ev} ${ev === 1 ? 'wydarzenie' : ev < 5 ? 'wydarzenia' : 'wydarzeń'}` : ''}${ev && dl ? ' i ' : ''}${dl ? `${dl} ${dl === 1 ? 'termin' : 'terminy'}` : ''}<small>Dodaj do Kalendarza jednym dotknięciem</small></span>${ic('chev', 'i14')}</span></button>` : '';
   paint(`${S.offline ? '<div class="off">Tryb offline · dane z pamięci</div>' : ''}
     <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></div>
@@ -228,7 +229,7 @@ async function loadMore(btn) {
   let r = await fetchPage(S.oldest);
   if (!r.messages.length && ['all', 'unread', 'offers', 'spam'].includes(S.filter)) { const h = await post('/api/history', { account_id: S.account || 0 }); if (h.added) r = await fetchPage(S.oldest); else if (!h.left) { toast('To wszystkie wiadomości'); btn.parentElement.remove(); return; } }
   if (!r.messages.length) { toast('To wszystkie wiadomości'); btn.parentElement.remove(); return; }
-  list.insertAdjacentHTML('beforeend', r.messages.map((m, i) => msgRow(m, i)).join(''));
+  list.insertAdjacentHTML('beforeend', r.messages.map((m, i) => stackRow(m, i)).join(''));
   S.oldest = Math.min(...r.messages.map((m) => m.date)); btn.disabled = false; btn.lastChild.textContent = 'Wczytaj starsze';
 }
 function chipsHtml(c = {}) {
@@ -951,6 +952,27 @@ function saveSearchSheet(query) {
 const fuCard = (f, i) => { const d = Math.max(3, Math.floor((Date.now() - f.date) / 864e5)); return `<div class="card gl" style="--i:${i}"><div class="k mono">${ic('clock', 'i14')}Bez odpowiedzi · ${d} dni</div><div class="ti">${esc(f.subject || '(bez tematu)')}</div><div class="wh">Do: ${esc(toNames(f.to_addr))}</div>
   <div class="actions"><button class="btn pri grow" data-nudge="${f.id}">${ic('send', 'i18')}Przypomnij się</button><button class="btn" data-open="${f.id}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button><button class="btn" data-fuoff="${f.id}" aria-label="Nie przypominaj">${ic('x', 'i18')}</button></div></div>`; };
 
+// ---- stosy: rozmowy w skrzynce i nadawcy w Spamie, Ofertach i Koszu ----
+function stackRow(m, i) {
+  const n = m.thread_n || 0; if (n < 2) return msgRow(m, i);
+  const L = n >= 6 ? 4 : n >= 4 ? 3 : n - 1, own = m.cat === 'sent' || m.cat === 'drafts';
+  const name = own ? `Do: ${toNames(m.to_addr)}` : dispName(m.from_addr, m.from_name);
+  return `<div class="cstack${n >= 6 ? ' big' : ''}" data-sid="${m.id}" style="--L:${L};--i:${i}">${Array.from({ length: L }, (_, k) => `<i class="slr" style="--k:${L - k}"></i>`).join('')}${msgRow(m, i, { stack: n })}
+    <button class="stkh gl" data-stkc="${m.id}" hidden aria-label="Zwiń"><span class="stn"><b>${esc(name)}</b><i class="mono">${n} ${n < 5 ? 'wiadomości' : 'wiadomości'}</i></span>${ic('down', 'i14')}</button><div class="stkx"></div></div>`;
+}
+async function toggleStack(st, more) {
+  const box = $('.stkx', st);
+  if (!more && st.classList.contains('open')) { closeStack(st); return; }
+  const btn = more ? $('.stkm', st) : null, before = btn ? +btn.dataset.before : 0;
+  if (btn) { btn.disabled = true; btn.textContent = 'Wczytuję…'; }
+  const r = await get(`/api/messages/${st.dataset.sid}/stack?limit=10${before ? '&before=' + before : ''}`);
+  const html = r.messages.map((m, k) => msgRow(m, k, { sub: true })).join('') + (r.more ? `<button class="btn stkm" data-stkmore="${st.dataset.sid}" data-before="${Math.min(...r.messages.map((m) => m.date))}">Pokaż więcej</button>` : '');
+  if (more) { btn.remove(); $('.stki', st).insertAdjacentHTML('beforeend', html); return; }
+  box.innerHTML = `<div class="stki">${html}</div>`;
+  $('.stkh', st).hidden = false; requestAnimationFrame(() => requestAnimationFrame(() => st.classList.add('open')));
+}
+function closeStack(st) { st.classList.remove('open'); $('.stkh', st).hidden = true; setTimeout(() => { if (!st.classList.contains('open')) $('.stkx', st).innerHTML = ''; }, 450); }
+
 // ---- nawigacja, zdarzenia ----
 function nav(cur) { document.querySelectorAll('.tab').forEach((t) => t.toggleAttribute('aria-current', false) || (t.dataset.tab === cur && t.setAttribute('aria-current', 'page'))); const bd = $('#bd-inbox'); bd.textContent = S.unread > 99 ? '99+' : S.unread; bd.hidden = !S.unread; }
 function badge() { try { S.unread ? navigator.setAppBadge?.(S.unread) : navigator.clearAppBadge?.(); } catch { /* brak wsparcia */ } }
@@ -970,10 +992,13 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck],[data-stk],[data-stkc],[data-stkmore]');
   if (!el) return; const d = el.dataset;
   try {
-    if (d.open) go(`#/m/${d.open}`);
+    if (d.stk) await toggleStack(el.closest('.cstack'));
+    else if (d.stkc) closeStack(el.closest('.cstack'));
+    else if (d.stkmore) await toggleStack(el.closest('.cstack'), true);
+    else if (d.open) go(`#/m/${d.open}`);
     else if (d.go) go(d.go);
     else if (d.qr) composeSheet({ mode: 'reply', m: S.cur.m, quick: d.qr });
     else if (d.nudge) { const r = await get(`/api/messages/${d.nudge}`); composeSheet({ mode: 'nudge', m: r.message }); }
@@ -1070,7 +1095,9 @@ document.addEventListener('change', async (ev) => {
     if (lock === 'y') { row = null; return; }
     if (lock === 'x') { dx = (!row.dataset.rl && ax < 0) ? 0 : ax; row.style.transition = 'none'; row.style.transform = `translateX(${dx * 0.55}px)`; row.classList.toggle('swl', dx < -8); row.classList.toggle('swr', dx > 8); row.classList.toggle('arm', Math.abs(dx) > 90); }
   }, { passive: true });
-  const collapse = (r) => {
+  const collapse = (r0) => {
+    const st = r0.closest('.cstack'), top = st && r0.matches('.cstack > .row'), r = top ? st : r0;
+    if (st && !top) setTimeout(() => { if (!$('.stki .row', st)) st.remove(); }, 380);
     r.style.height = r.offsetHeight + 'px'; r.style.overflow = 'hidden';
     requestAnimationFrame(() => { r.style.transition = 'height .32s ease, opacity .25s, margin .32s, padding .32s'; r.style.height = '0'; r.style.opacity = '0'; r.style.marginTop = '-8px'; r.style.paddingTop = '0'; r.style.paddingBottom = '0'; setTimeout(() => r.remove(), 340); });
   };

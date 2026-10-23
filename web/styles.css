@@ -278,3 +278,24 @@ html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
 .chip.op{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px}
 #sx .chips{margin-top:10px}
 #cwhen .cg{max-height:88vh;overflow:auto}#cwhen .org{padding:10px 6px}
+
+/* ---- stosy kart ---- */
+.cstack{position:relative;margin-top:calc(var(--L)*5px);}
+.cstack:not(.open)>.row{width:calc(100% - var(--L)*6px)}
+.cstack>.row{position:relative;z-index:2}
+.cstack .slr{position:absolute;inset:0;border-radius:24px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.12);transform:translate(calc(var(--k)*6px),calc(var(--k)*-5px));z-index:calc(1 - var(--k));transition:transform .35s ease,opacity .3s;pointer-events:none}
+.cstack.big .slr{box-shadow:0 6px 14px rgba(0,0,0,.35)}
+.cstack.open .slr{opacity:0;transform:translateY(8px)}
+.cstack.open>.row{display:none}
+.xn{font:600 11px/1 var(--mono,monospace);background:rgba(255,255,255,.14);border-radius:8px;padding:2px 6px;margin-right:6px}
+.stkh{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;border-radius:14px;border:0;color:inherit;text-align:left;margin-bottom:8px;z-index:2;position:relative}
+.stkh[hidden]{display:none}
+.stkh .stn{display:flex;flex-direction:column;gap:2px}.stkh i{font-style:normal;font-size:11px;opacity:.65}
+.stkx{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.2,.8,.2,1)}
+.cstack.open .stkx{grid-template-rows:1fr}
+.stki{overflow:hidden;min-height:0;display:flex;flex-direction:column;gap:8px}
+.stki .row.csub{opacity:0;transform:translateY(-14px) scale(.97);animation:stkOut .45s cubic-bezier(.2,.8,.2,1) forwards;animation-delay:calc(var(--i)*45ms)}
+.stki .row.csub{margin-left:10px;width:calc(100% - 10px)}
+.stkm{align-self:center;margin:4px 0}
+@keyframes stkOut{to{opacity:1;transform:none}}
+.cstack:not(.open) .slr{right:calc(var(--L)*6px);background:rgba(255,255,255,.035)}

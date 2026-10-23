@@ -139,3 +139,40 @@ test('powiadomienia respektują wyciszenie i tryb "ważne"', async () => {
   push.setPrefs(uid, { mode: 'all' });
   db.prepare('DELETE FROM push_subs').run();
 });
+
+test('odkładanie: wiadomość znika z listy, widać ją w "Odłożone", wraca po terminie', async () => {
+  const list = (await api('GET', '/api/messages')).body.messages;
+  const m = list[list.length - 1];
+  assert.equal((await api('POST', `/api/messages/${m.id}/snooze`, { until: Date.now() - 1000 })).status, 400);
+  assert.equal((await api('POST', `/api/messages/${m.id}/snooze`, { until: Date.now() + 3600e3 })).status, 200);
+  const after = (await api('GET', '/api/messages')).body;
+  assert.equal(after.messages.some((x) => x.id === m.id), false); assert.equal(after.snoozed, 1);
+  assert.equal((await api('GET', '/api/messages?tab=snoozed')).body.messages[0].id, m.id);
+  const { wakeSnoozed } = await import('../server/jobs.js');
+  assert.equal(wakeSnoozed(null, Date.now() + 2 * 3600e3), 1);
+  const back = (await api('GET', '/api/messages')).body.messages;
+  assert.equal(back[0].id, m.id); assert.equal(back[0].unread, true); // wraca na górę jako nieprzeczytana
+});
+test('płatności: lista, suma, oznaczanie jako opłacone', async () => {
+  const o = (await api('GET', '/api/obligations')).body;
+  assert.ok(o.open.length >= 1); assert.ok(o.total >= 1240);
+  const it = o.open.find((i) => i.amount === 1240);
+  await api('POST', `/api/items/${it.id}`, { status: 'paid' });
+  const o2 = (await api('GET', '/api/obligations')).body;
+  assert.equal(o2.open.some((i) => i.id === it.id), false); assert.equal(o2.paid[0].id, it.id); assert.equal(o2.paid_total, 1240);
+});
+test('przeglądy: godziny w ustawieniach, treść i jednorazowa wysyłka dziennie', async () => {
+  assert.equal((await api('POST', '/api/push/prefs', { morning: '7:5' })).status, 400);
+  const r = await api('POST', '/api/push/prefs', { morning: '07:30', evening: '19:00' });
+  assert.deepEqual([r.body.morning, r.body.evening], ['07:30', '19:00']);
+  const { digestText, runDigests } = await import('../server/jobs.js');
+  const { db } = await import('../server/db.js');
+  const uid = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get().id;
+  const t = digestText(uid, 'morning', new Date().toISOString().slice(0, 10));
+  assert.ok(t === null || (t.title && t.url));
+  db.prepare('INSERT OR REPLACE INTO push_subs(user_id,endpoint,p256dh,auth,created_at) VALUES(?,?,?,?,?)').run(uid, 'https://127.0.0.1:1/y', 'k', 'a', 1);
+  const at = new Date('2026-10-23T05:31:00Z'); // 07:31 w Warszawie
+  runDigests(at); assert.equal(runDigests(at), 0); // druga próba tego samego dnia nic nie wysyła
+  db.prepare('DELETE FROM push_subs').run();
+  await api('POST', '/api/push/prefs', { morning: '', evening: '' });
+});

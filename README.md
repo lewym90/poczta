@@ -44,3 +44,9 @@ deploy/   install.sh
 2. Logowanie Google/Microsoft przez OAuth (bez haseł aplikacji), poranne i wieczorne podsumowania push, przypomnienia o terminach.
 3. Gemini (płatny klucz, na żądanie, z dziennikiem AI) do trudniejszych dat i szkiców odpowiedzi. Odpowiedź głosem, odkładanie, zobowiązania.
 4. Passkey/Face ID, HTML wiadomości w piaskownicy (bez zdalnych obrazów), załączniki, wiele użytkowników, rozliczenia.
+
+## Etap 2
+
+- **Odkładanie**: przeciągnięcie wiadomości w lewo (lub zegar w wątku) odkłada ją na wieczór, jutro rano, weekend, za tydzień albo na własny termin. Wraca na górę jako nowa, z powiadomieniem. Przeciągnięcie w prawo oznacza ją jako przeczytaną.
+- **Płatności**: zakładka z sumą do zapłaty, podziałem na „po terminie / w tym tygodniu / później" i przyciskiem „Opłacone".
+- **Przeglądy**: poranne (sprawy na dziś, płatności tygodnia, nieprzeczytane) i wieczorne (plan na jutro) powiadomienie push. Wybierasz godzinę albo wyłączasz w Konta i prywatność. Gdy nic nie czeka, nie przychodzi. Strefa czasowa: `POCZTA_TZ` (domyślnie Europe/Warsaw).

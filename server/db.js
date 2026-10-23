@@ -47,6 +47,9 @@ const MIGRATIONS = [
      endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ua TEXT, created_at INTEGER NOT NULL);
    CREATE INDEX push_user ON push_subs(user_id);`,
   `ALTER TABLE accounts ADD COLUMN notify INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE messages ADD COLUMN snoozed_until INTEGER;
+   ALTER TABLE messages ADD COLUMN woke_at INTEGER;
+   CREATE INDEX msg_snooze ON messages(user_id, snoozed_until);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

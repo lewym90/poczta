@@ -1,3 +1,5 @@
+> **Status: wprowadzone** w `lewym90/kalendarz` (commit 12f409f). Poniżej opis zmiany.
+
 # Poprawka w aplikacji Kalendarz (1 linia)
 
 Poczta otwiera Kalendarz linkiem `?new=event&text=Wizyta kardiolog 28.10.2026 17:30`.

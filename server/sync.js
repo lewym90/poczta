@@ -7,6 +7,7 @@ import { demo } from './providers/demo.js';
 import { extractItems } from './intel/extract.js';
 import { assessRisk } from './intel/risk.js';
 import { notifyNewMessages } from './push.js';
+import { startJobs } from './jobs.js';
 
 export const providers = { imap, demo };
 const listeners = new Set();
@@ -102,5 +103,6 @@ export function startScheduler() {
   };
   const t = setInterval(tick, config.syncEverySec * 1000);
   t.unref();
-  return () => clearInterval(t);
+  const stopJobs = startJobs(emit);
+  return () => { clearInterval(t); stopJobs(); };
 }

@@ -15,6 +15,7 @@ const P = {
   chev: '<path d="m9.500 5.500 6.500 6.500-6.500 6.500"/>', down: '<path d="m6 9.500 6 6 6-6"/>', back: '<path d="m14.500 5.500-6.500 6.500 6.500 6.500"/>',
   send: '<path d="M4 12 20 4l-4 16-4.500-6.500z"/>', plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="m6 6 12 12M18 6 6 18"/>', check: '<path d="m5 12.500 4.500 4.500L19 7.500"/>',
   shield: '<path class="f" d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 8.500v4M12 15.600v.1"/>',
+  clock: '<circle cx="12" cy="12" r="8.500"/><path d="M12 7.500V12l3 2"/>', wallet: '<path d="M4 8.500A2.500 2.500 0 0 1 6.500 6H18v3M4 8.500V17a2 2 0 0 0 2 2h12a1 1 0 0 0 1-1V9H6.500A2.500 2.500 0 0 1 4 8.500zM15.500 14h1.500"/>',
   bell: '<path d="M6 17.500V11a6 6 0 0 1 12 0v6.500l1.500 1.500h-15zM10 21h4"/>', bellOff: '<path d="M6 17.500V11a6 6 0 0 1 9-5.200M18 11v6.500l1.500 1.500h-15M10 21h4M4 4l16 16"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
 };
@@ -111,7 +112,8 @@ const ringSvg = (cls) => `<svg width="52" height="52" viewBox="0 0 52 52" aria-h
 
 function msgRow(m, i) {
   const it = m.items.find((x) => x.status === 'new') || m.items[0];
-  const chip = m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '';
+  const snz = m.snoozed_until > Date.now() ? `<span class="cp snz">${ic('clock', 'i14')}Wraca ${esc(snzLabel(new Date(m.snoozed_until)))}</span>` : '';
+  const chip = snz || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
   return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div></div>
     <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${fmtTime(m.date)}</span></div>
@@ -129,10 +131,10 @@ function heroHtml(t) {
 }
 
 async function viewInbox() {
-  let msgs, today;
+  let msgs, today, pay = null;
   try {
     const q = new URLSearchParams({ tab: S.seg === 'msg' ? S.filter : 'all', limit: '60' }); if (S.account) q.set('account', S.account);
-    [msgs, today] = await Promise.all([get('/api/messages?' + q), get('/api/today')]);
+    [msgs, today, pay] = await Promise.all([get('/api/messages?' + q), get('/api/today'), S.seg === 'pay' ? get('/api/obligations') : null]);
     cacheSet('inbox', { msgs, today }); S.offline = false;
   } catch (e) { if (e.status) throw e; const c = cacheGet('inbox'); if (!c) throw e; ({ msgs, today } = c); S.offline = true; }
   S.unread = msgs.unread; badge(); await loadAccounts(true);
@@ -143,14 +145,15 @@ async function viewInbox() {
   let body = '';
   if (!S.accounts.length) body = emptyNoAccount();
   else if (S.seg === 'cases') body = casesHtml(pend);
-  else body = `<div class="chips" role="group" aria-label="Filtr">${[['all', 'Wszystko'], ['unread', 'Nieprzeczytane'], ['action', 'Do działania'], ['dates', 'Terminy']].map(([k, l]) => `<button class="chip" data-filter="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
+  else if (S.seg === 'pay') body = pay ? payHtml(pay) : '<div class="empty">Płatności są dostępne online.</div>';
+  else body = `<div class="chips" role="group" aria-label="Filtr">${[['all', 'Wszystko'], ['unread', 'Nieprzeczytane'], ['action', 'Do działania'], ['dates', 'Terminy'], ['snoozed', 'Odłożone']].map(([k, l]) => `<button class="chip" data-filter="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
     <div class="list">${msgs.messages.length ? msgs.messages.map(msgRow).join('') : `<div class="empty"><div class="big ser">Pusto</div>Brak wiadomości w tym widoku.</div>`}</div>`;
   const found = pend.length && S.seg === 'msg' ? `<button class="found" data-seg="cases" style="--i:2" aria-label="Przejrzyj wykryte sprawy"><span class="spin"></span><span class="in"><span class="ico">${ic('spark', 'i18')}</span><span class="tx">Poczta znalazła ${ev ? `${ev} ${ev === 1 ? 'wydarzenie' : ev < 5 ? 'wydarzenia' : 'wydarzeń'}` : ''}${ev && dl ? ' i ' : ''}${dl ? `${dl} ${dl === 1 ? 'termin' : 'terminy'}` : ''}<small>Dodaj do Kalendarza jednym dotknięciem</small></span>${ic('chev', 'i14')}</span></button>` : '';
   paint(`${S.offline ? '<div class="off">Tryb offline · dane z pamięci</div>' : ''}
     <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></div>
     ${S.accounts.length ? heroHtml(today) : ''}
-    ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button></div>` : ''}
-    ${found}${body}`, { fab: !!S.accounts.length });
+    ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
+    ${S.seg === 'msg' && S.filter === 'snoozed' ? '' : found}${body}`, { fab: !!S.accounts.length });
   nav('inbox');
 }
 
@@ -170,13 +173,51 @@ function caseCard(it, i = 0) {
   <div class="actions"><button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-open="${it.mid ?? it.message_id}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button></div></div>`;
 }
 
+const payRow = (it, i, overdue) => `<div class="card gl ${overdue ? 'od' : ''}" style="--i:${i}"><div class="k mono">${ic('coin', 'i14')}${overdue ? 'Po terminie' : 'Termin płatności'}</div><div class="ti">${esc(it.title.replace(/^Do zapłaty [^:]*:\s*/i, ''))}</div><div class="wh">${it.amount ? `<b class="amt">${esc(money(it))}</b> · ` : ''}${esc(whenText({ ...it, amount: null }).replace(/^Zapłać /, '').replace(/^dziś$/, 'dziś'))}</div>
+  <div class="actions"><button class="btn pri grow" data-paid="${it.id}">${ic('check', 'i18')}Opłacone</button><button class="btn" data-cal="${it.id}" aria-label="Dodaj do Kalendarza">${ic('cal', 'i18')}</button><button class="btn" data-open="${it.mid}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button></div></div>`;
+function payHtml(o) {
+  if (!o.open.length && !o.paid.length) return `<div class="empty"><div class="big ser">Brak płatności</div>Gdy w mailu pojawi się faktura lub rachunek z terminem, zobaczysz go tutaj.</div>`;
+  const today = new Date(); const ymd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const late = o.open.filter((i) => i.starts_at.slice(0, 10) < ymd), soon = o.open.filter((i) => i.starts_at.slice(0, 10) >= ymd && dayDiff(parseLocal(i.starts_at), today) < 8), later = o.open.filter((i) => dayDiff(parseLocal(i.starts_at), today) >= 8);
+  const sum = (a) => a.reduce((t, i) => t + (i.amount || 0), 0), fmt = (n) => `${n.toLocaleString('pl-PL', { maximumFractionDigits: 2 })} zł`;
+  let i = 1;
+  const grp = (t, a, od) => a.length ? `<div class="sec">${t}${sum(a) ? ` · ${fmt(sum(a))}` : ''}</div>${a.map((x) => payRow(x, i++, od)).join('')}` : '';
+  return `<section class="hero gl pay" style="--i:0"><div style="display:flex;flex-direction:column;gap:6px"><span class="eyebrow mono">Do zapłaty</span><span class="t">${o.total ? fmt(o.total) : '0 zł'}</span><span class="s">${o.open.length} ${o.open.length === 1 ? 'płatność' : 'płatności'}${o.overdue ? ` · <b style="color:var(--er)">po terminie: ${o.overdue}${o.overdue_total ? ` (${fmt(o.overdue_total)})` : ''}</b>` : ''}${o.unknown ? ` · ${o.unknown} bez kwoty` : ''}</span></div></section>
+  ${grp('Po terminie', late, true)}${grp('W tym tygodniu', soon)}${grp('Później', later)}
+  ${o.paid.length ? `<div class="sec">Opłacone w tym miesiącu · ${fmt(o.paid_total)}</div>${o.paid.map((x) => `<div class="kv paid"><span>${esc(x.title)}</span><span>${x.amount ? esc(money(x)) : ''} <button class="link" data-unpaid="${x.id}">cofnij</button></span></div>`).join('')}` : ''}`;
+}
+
+function snoozeOpts() {
+  const n = new Date(), at = (d, h) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x; }, plus = (d) => { const x = new Date(n); x.setDate(x.getDate() + d); return x; };
+  const o = [];
+  if (n.getHours() < 17) o.push(['Dziś wieczorem', at(n, 18)]);
+  o.push(['Jutro rano', at(plus(1), 8)]);
+  const dow = n.getDay(); if (dow >= 1 && dow <= 5) o.push(['W weekend', at(plus(6 - dow), 9)]);
+  o.push(['Za tydzień', at(plus(7), 8)]);
+  return o;
+}
+const snzLabel = (d) => `${dayDiff(d, new Date()) === 0 ? 'dziś' : dayDiff(d, new Date()) === 1 ? 'jutro' : `${WD[d.getDay()]} ${d.getDate()}.${pad(d.getMonth() + 1)}`} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function snoozeSheet(id, current) {
+  S.snoozeId = +id;
+  const soon = new Date(Date.now() + 3600e3); const val = `${soon.getFullYear()}-${pad(soon.getMonth() + 1)}-${pad(soon.getDate())}T${pad(soon.getHours())}:00`;
+  sheet(`<div class="sheet-b"><h2 class="ser" style="font-size:30px;margin:6px 0 4px">Odłóż na później</h2><p style="color:var(--ink2);margin:0 0 10px;font-size:14.5px">Wiadomość zniknie ze skrzynki i wróci jako nowa, z powiadomieniem.${current ? ` Teraz wraca ${esc(snzLabel(new Date(current)))}.` : ''}</p>
+    ${snoozeOpts().map(([l, d]) => `<button class="btn snz" data-snz="${d.getTime()}"><span>${l}</span><small class="mono">${esc(snzLabel(d))}</small></button>`).join('')}
+    <div class="fld"><label for="snzc">Własny termin</label><input class="in" id="snzc" type="datetime-local" value="${val}"></div>
+    <div class="actions"><button class="btn pri grow" data-act="snzcustom">${ic('clock', 'i18')}Odłóż</button>${current ? '<button class="btn" data-snz="now">Wróć teraz</button>' : ''}<button class="btn" data-act="close">Anuluj</button></div></div>`);
+}
+async function doSnooze(until) {
+  await post(`/api/messages/${S.snoozeId}/snooze`, { until });
+  closeSheet(); toast(until ? 'Odłożone · wróci ' + snzLabel(new Date(until)) : 'Wiadomość wróciła');
+  if (/^#\/m\//.test(location.hash)) go('#/'); else route();
+}
+
 async function viewMessage(id) {
   const { message: m, items } = await get(`/api/messages/${id}`);
   if (m.unread) post(`/api/messages/${id}/read`).then(() => { S.unread = Math.max(0, S.unread - 1); badge(); }).catch(() => {});
   const risky = m.risk >= 2;
   const d = new Date(m.date);
   const linkify = (t) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
-  paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></div>
+  paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><span style="display:flex;gap:8px"><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span></div>
     <h1 class="subject">${esc(m.subject)}</h1>
     <div class="meta"><div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div><div class="w"><div class="n">${esc(m.from_name || m.from_addr)}</div><div class="d mono">${esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div></div>
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
@@ -245,6 +286,7 @@ async function pushState() {
   return { ok: true, perm: Notification.permission, on: !!sub && Notification.permission === 'granted', reg, sub };
 }
 const QUIET = [['', 'Wyłączone'], ['22:00-07:00', '22:00–07:00'], ['23:00-06:00', '23:00–06:00'], ['00:00-08:00', '00:00–08:00']];
+const DIGEST_AM = [['', 'Wyłączony'], ['06:30', '6:30'], ['07:30', '7:30'], ['08:30', '8:30']], DIGEST_PM = [['', 'Wyłączony'], ['18:00', '18:00'], ['19:00', '19:00'], ['20:00', '20:00'], ['21:00', '21:00']];
 const sw = (on, act, label) => `<button class="sw ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" data-act="${act}"><i></i></button>`;
 async function renderPushCard() {
   const el = $('#pushcard'); if (!el) return;
@@ -259,7 +301,8 @@ async function renderPushCard() {
   const pr = await get('/api/push/prefs').catch(() => ({ mode: 'all', quiet: '' }));
   el.innerHTML = head + row(true) + `<div class="fld"><label for="pmode">Które wiadomości</label><select class="in" id="pmode"><option value="all"${pr.mode === 'all' ? ' selected' : ''}>Wszystkie nowe</option><option value="important"${pr.mode === 'important' ? ' selected' : ''}>Tylko z terminem, paczką lub płatnością</option></select></div>`
     + `<div class="fld"><label for="pquiet">Ciche godziny (bez powiadomień)</label><select class="in" id="pquiet">${QUIET.map(([v, t]) => `<option value="${v}"${pr.quiet === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
-    + `<div class="wh" style="line-height:21px;margin-top:8px">Ustawienia dotyczą wszystkich Twoich urządzeń. Dzwonek przy skrzynce wycisza tylko tę skrzynkę.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button></div>`;
+    + `<div class="fld"><label for="pmorning">Poranny przegląd</label><select class="in" id="pmorning">${DIGEST_AM.map(([v, t]) => `<option value="${v}"${(pr.morning || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div><div class="fld"><label for="pevening">Wieczorny przegląd</label><select class="in" id="pevening">${DIGEST_PM.map(([v, t]) => `<option value="${v}"${(pr.evening || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
+    + `<div class="wh" style="line-height:21px;margin-top:8px">Przegląd to jedno powiadomienie z tym, co czeka: sprawy na dziś i płatności rano, plan na jutro wieczorem. Gdy nic nie czeka, nie przychodzi. Ustawienia dotyczą wszystkich Twoich urządzeń. Dzwonek przy skrzynce wycisza tylko tę skrzynkę.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button></div>`;
 }
 async function pushOn() {
   const st = await pushState(); if (!st.ok) throw new Error(st.why);
@@ -330,7 +373,8 @@ async function route() {
 window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true); route(); });
 
 document.addEventListener('click', async (ev) => {
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-reply],[data-done],[data-tab]');
+  if (Date.now() - (S.swiped || 0) < 450) return;
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -344,6 +388,11 @@ document.addEventListener('click', async (ev) => {
     else if (d.reply) composeSheet(S.cur);
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
+    else if (d.snooze) snoozeSheet(d.snooze, +d.until || 0);
+    else if (d.snz) await doSnooze(d.snz === 'now' ? null : +d.snz);
+    else if (d.act === 'snzcustom') { const t = new Date($('#snzc').value).getTime(); if (!t) throw new Error('Wybierz datę i godzinę'); await doSnooze(t); }
+    else if (d.paid) { await post(`/api/items/${d.paid}`, { status: 'paid' }); toast('Oznaczono jako opłacone'); route(); }
+    else if (d.unpaid) { await post(`/api/items/${d.unpaid}`, { status: 'new' }); route(); }
     else if (d.bell) { await post(`/api/accounts/${d.bell}/notify`, { on: d.on !== '1' }); toast(d.on === '1' ? 'Skrzynka wyciszona' : 'Powiadomienia z tej skrzynki włączone'); viewAccounts(); }
     else if (d.pick !== undefined) { S.account = +d.pick; closeSheet(); route(); }
     else if (d.act === 'accmenu') accMenu();
@@ -364,10 +413,39 @@ document.addEventListener('change', async (ev) => {
   try {
     if (t.id === 'pmode') await post('/api/push/prefs', { mode: t.value });
     else if (t.id === 'pquiet') await post('/api/push/prefs', { quiet: t.value });
+    else if (t.id === 'pmorning') await post('/api/push/prefs', { morning: t.value });
+    else if (t.id === 'pevening') await post('/api/push/prefs', { evening: t.value });
     else return;
     toast('Zapisano');
   } catch (e) { toast(e.message || 'Błąd'); }
 });
+// Gesty na liście: w lewo = odłóż, w prawo = przeczytane/nieprzeczytane.
+(() => {
+  let row = null, sx = 0, sy = 0, dx = 0, lock = null;
+  const v = $('#view');
+  v.addEventListener('touchstart', (e) => {
+    row = e.target.closest('.row[data-open]'); if (!row || e.touches.length > 1) { row = null; return; }
+    v.classList.remove('enter'); const t = e.touches[0]; sx = t.clientX; sy = t.clientY; dx = 0; lock = null;
+  }, { passive: true });
+  v.addEventListener('touchmove', (e) => {
+    if (!row) return; const t = e.touches[0], ax = t.clientX - sx, ay = t.clientY - sy;
+    if (!lock && (Math.abs(ax) > 10 || Math.abs(ay) > 10)) lock = Math.abs(ax) > Math.abs(ay) * 1.4 ? 'x' : 'y';
+    if (lock === 'y') { row = null; return; }
+    if (lock === 'x') { dx = ax; row.style.transition = 'none'; row.style.transform = `translateX(${dx * 0.55}px)`; row.classList.toggle('swl', dx < -8); row.classList.toggle('swr', dx > 8); row.classList.toggle('arm', Math.abs(dx) > 90); }
+  }, { passive: true });
+  const end = () => {
+    if (!row) return; const r = row; row = null;
+    r.style.transition = ''; r.style.transform = ''; r.classList.remove('swl', 'swr', 'arm');
+    if (lock !== 'x') return;
+    const id = r.dataset.open;
+    if (dx < -90) { S.swiped = Date.now(); snoozeSheet(id); }
+    else if (dx > 90) {
+      S.swiped = Date.now(); const wasUnread = r.classList.contains('unread');
+      post(`/api/messages/${id}/read`, { read: wasUnread }).then(() => { r.classList.toggle('unread', !wasUnread); S.unread = Math.max(0, S.unread + (wasUnread ? -1 : 1)); badge(); toast(wasUnread ? 'Przeczytane' : 'Oznaczono jako nieprzeczytane'); }).catch((e) => toast(e.message));
+    }
+  };
+  v.addEventListener('touchend', end); v.addEventListener('touchcancel', end);
+})();
 $('#fab').onclick = () => composeSheet();
 // Samonaprawa: iOS bywa, że gubi subskrypcję, a serwer zna tylko starą. Przy starcie odnawiamy ją po cichu.
 async function pushHeal() {
@@ -393,7 +471,7 @@ async function boot() {
   route(); pushHeal();
   if (S.user && 'EventSource' in window) {
     const es = new EventSource('api/events');
-    es.addEventListener('sync', (e) => { const d = JSON.parse(e.data); toast(`Nowe wiadomości: ${d.added}`); if (/^(#\/?|#\/today)?$/.test(location.hash)) { S.animate = false; route(); } });
+    es.addEventListener('sync', (e) => { const d = JSON.parse(e.data); toast(d.woke ? 'Odłożona wiadomość wróciła' : `Nowe wiadomości: ${d.added}`); if (/^(#\/?|#\/today)?$/.test(location.hash)) { S.animate = false; route(); } });
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.user && /^(#\/?|#\/today)?$/.test(location.hash) && !$('#sheet-root').firstChild) { S.animate = false; route(); } });
 }

@@ -47,7 +47,7 @@ function withItems(uid, rows) {
   for (const it of items) { if (!by.has(it.message_id)) by.set(it.message_id, []); by.get(it.message_id).push(it); }
   return rows.map((r) => { const its = by.get(r.id) || []; const open = its.filter((i) => i.status === 'new'); return { ...r, unread: !!r.unread, has_attach: !!r.has_attach, items: its, open_items: open.length, urgency: urgency(open[0]?.starts_at) }; });
 }
-const MSG_COLS = 'm.id,m.account_id,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk';
+const MSG_COLS = 'm.id,m.account_id,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at';
 
 function ftsQuery(q) {
   const toks = String(q).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
@@ -145,17 +145,21 @@ route('GET', '/api/messages', (ctx) => {
   const where = ['m.user_id=?']; const args = [uid];
   if (acc) { where.push('m.account_id=?'); args.push(acc); }
   if (before) { where.push('m.date<?'); args.push(before); }
+  const now = Date.now();
+  if (tab === 'snoozed') { where.push('m.snoozed_until>?'); args.push(now); }
+  else { where.push('(m.snoozed_until IS NULL OR m.snoozed_until<=?)'); args.push(now); }
   if (tab === 'unread') where.push('m.unread=1');
   if (tab === 'action') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status='new')");
   if (tab === 'dates') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status IN ('new','added'))");
-  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY m.date DESC LIMIT ?`).all(...args, limit);
-  const total = db.prepare('SELECT COUNT(*) n, SUM(unread) u FROM messages WHERE user_id=?').get(uid);
-  return { messages: withItems(uid, rows), unread: total.u || 0 };
+  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit);
+  const total = db.prepare('SELECT SUM(unread) u FROM messages WHERE user_id=? AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid, now);
+  const snoozed = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND snoozed_until>?').get(uid, now).n;
+  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed };
 });
 route('GET', '/api/messages/:id', (ctx) => {
   const m = db.prepare('SELECT m.*,a.email AS account_email,a.label AS account_label FROM messages m JOIN accounts a ON a.id=m.account_id WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
   const items = db.prepare("SELECT * FROM found_items WHERE message_id=? AND user_id=? AND status!='dismissed' ORDER BY starts_at").all(m.id, ctx.user.id).map((i) => ({ ...i, link: calendarLink(i) }));
-  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id }, items };
+  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until }, items };
 });
 route('POST', '/api/messages/:id/read', async (ctx) => {
   const m = db.prepare('SELECT m.id,m.uid,m.account_id FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
@@ -164,6 +168,13 @@ route('POST', '/api/messages/:id/read', async (ctx) => {
   const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
   if (acc && acc.provider !== 'demo') providers[acc.provider].setSeen({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid, read).catch(() => {});
   return { ok: true };
+});
+route('POST', '/api/messages/:id/snooze', (ctx) => {
+  const until = ctx.body.until === null ? null : Number(ctx.body.until);
+  if (until !== null && (!Number.isFinite(until) || until < Date.now() + 30e3 || until > Date.now() + 366 * 86400e3)) bad('Wybierz termin w przyszłości (do roku)');
+  const r = db.prepare('UPDATE messages SET snoozed_until=? WHERE id=? AND user_id=?').run(until, +ctx.params.id, ctx.user.id);
+  if (!r.changes) bad('Nie ma takiej wiadomości', 404);
+  audit(ctx.user.id, until ? 'snooze' : 'unsnooze', ctx.params.id); return { ok: true, until };
 });
 route('GET', '/api/search', (ctx) => {
   const fq = ftsQuery(ctx.query.get('q') || '');
@@ -193,7 +204,7 @@ route('GET', '/api/items', (ctx) => {
 });
 route('POST', '/api/items/:id', (ctx) => {
   const st = ctx.body.status;
-  if (!['new', 'added', 'dismissed'].includes(st)) bad('Niepoprawny status');
+  if (!['new', 'added', 'dismissed', 'paid'].includes(st)) bad('Niepoprawny status');
   const r = db.prepare('UPDATE found_items SET status=?, resolved_at=? WHERE id=? AND user_id=?').run(st, st === 'new' ? null : Date.now(), +ctx.params.id, ctx.user.id);
   if (!r.changes) bad('Nie ma takiej sprawy', 404);
   audit(ctx.user.id, `item_${st}`, ctx.params.id);
@@ -203,6 +214,17 @@ route('GET', '/api/items/:id/ics', (ctx) => {
   const it = db.prepare('SELECT * FROM found_items WHERE id=? AND user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej sprawy', 404);
   ctx.raw = { type: 'text/calendar; charset=utf-8', body: buildIcs(it), headers: { 'Content-Disposition': `attachment; filename="poczta-${it.id}.ics"` } };
 });
+route('GET', '/api/obligations', (ctx) => {
+  const uid = ctx.user.id, now = new Date();
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = ymd(now), month0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const q = (st, extra, ...a) => db.prepare(`SELECT f.*,m.subject,m.from_name,m.id AS mid FROM found_items f JOIN messages m ON m.id=f.message_id WHERE f.user_id=? AND f.kind='deadline' AND f.status=? ${extra}`).all(uid, st, ...a).map((i) => ({ ...i, link: calendarLink(i) }));
+  const open = q('new', 'ORDER BY f.starts_at LIMIT 200');
+  const paid = q('paid', 'AND f.resolved_at>=? ORDER BY f.resolved_at DESC LIMIT 100', month0);
+  const sum = (a) => Math.round(a.reduce((t, i) => t + (i.amount || 0), 0) * 100) / 100;
+  const overdue = open.filter((i) => i.starts_at.slice(0, 10) < today);
+  return { open, paid, total: sum(open), overdue_total: sum(overdue), overdue: overdue.length, paid_total: sum(paid), unknown: open.filter((i) => !i.amount).length };
+});
 route('GET', '/api/today', (ctx) => {
   const uid = ctx.user.id, now = new Date();
   const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -210,7 +232,7 @@ route('GET', '/api/today', (ctx) => {
   const open = db.prepare(`SELECT f.*,m.subject,m.from_name,m.id AS mid FROM found_items f JOIN messages m ON m.id=f.message_id WHERE f.user_id=? AND f.status IN ('new','added') AND f.starts_at>=? ORDER BY f.starts_at LIMIT 100`).all(uid, ymd(d0)).map((i) => ({ ...i, link: calendarLink(i) }));
   const done = db.prepare('SELECT COUNT(*) n FROM found_items WHERE user_id=? AND resolved_at>=?').get(uid, d0.getTime()).n;
   const pending = open.filter((i) => i.status === 'new').length;
-  const unread = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1').get(uid).n;
+  const unread = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid, Date.now()).n;
   return { items: open, done, pending, unread, now: now.getTime() };
 });
 
@@ -226,7 +248,7 @@ route('POST', '/api/push/subscribe', (ctx) => {
 });
 route('GET', '/api/push/prefs', (ctx) => ({ ...getPrefs(ctx.user.id), devices: db.prepare('SELECT COUNT(*) n FROM push_subs WHERE user_id=?').get(ctx.user.id).n }));
 route('POST', '/api/push/prefs', (ctx) => {
-  try { setPrefs(ctx.user.id, { mode: ctx.body.mode, quiet: ctx.body.quiet }); } catch (e) { bad(e.message); }
+  try { setPrefs(ctx.user.id, { mode: ctx.body.mode, quiet: ctx.body.quiet, morning: ctx.body.morning, evening: ctx.body.evening }); } catch (e) { bad(e.message); }
   return getPrefs(ctx.user.id);
 });
 route('POST', '/api/accounts/:id/notify', (ctx) => {

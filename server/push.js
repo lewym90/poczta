@@ -17,7 +17,7 @@ const vapid = loadVapid();
 export const vapidPublicKey = () => vapid.publicKey;
 
 const contact = (userId) => `mailto:${db.prepare('SELECT email FROM users WHERE id=?').get(userId)?.email || 'admin@example.com'}`;
-const unread = (userId) => db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1').get(userId).n;
+const unread = (userId) => db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND (snoozed_until IS NULL OR snoozed_until<=?)').get(userId, Date.now()).n;
 
 export async function sendToUser(userId, payload) {
   if (process.env.POCZTA_PUSH === '0') return 0;
@@ -38,11 +38,16 @@ export async function sendToUser(userId, payload) {
 // Ustawienia powiadomień użytkownika (tabela flags): tryb 'all' | 'important', ciche godziny "22:00-07:00".
 export function getPrefs(userId) {
   const get = (k, d) => db.prepare('SELECT value FROM flags WHERE user_id=? AND key=?').get(userId, k)?.value ?? d;
-  return { mode: get('push_mode', 'all'), quiet: get('push_quiet', '') };
+  return { mode: get('push_mode', 'all'), quiet: get('push_quiet', ''), morning: get('digest_morning', ''), evening: get('digest_evening', '') };
 }
-export function setPrefs(userId, { mode, quiet }) {
+export function setPrefs(userId, { mode, quiet, morning, evening }) {
   const put = (k, v) => db.prepare('INSERT INTO flags(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value').run(userId, k, v);
   if (mode !== undefined) { if (!['all', 'important'].includes(mode)) throw new Error('Niepoprawny tryb'); put('push_mode', mode); }
+  for (const [k, v] of [['digest_morning', morning], ['digest_evening', evening]]) {
+    if (v === undefined) continue;
+    if (v && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw new Error('Niepoprawna godzina przeglądu');
+    put(k, v);
+  }
   if (quiet !== undefined) { if (quiet && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(quiet)) throw new Error('Niepoprawne ciche godziny'); put('push_quiet', quiet); }
 }
 export function inQuiet(quiet, now = new Date()) {

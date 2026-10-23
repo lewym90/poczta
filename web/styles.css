@@ -261,3 +261,20 @@ html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
 .crow{position:relative;touch-action:pan-y}
 .crow.swl::after{content:attr(data-rl);position:absolute;top:50%;transform:translateY(-50%);left:calc(100% + 18px);font:700 12px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--er);opacity:.7;white-space:nowrap;pointer-events:none}
 .crow.arm::after{opacity:1}.crow.arm{border-color:var(--acc2)}
+
+/* wiadomości: szybkie odpowiedzi, zaplanowane, załączniki, zapisane wyszukiwania */
+.qrow{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+.qrow .chip{height:32px}
+.crest{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:10px 12px;border-radius:14px;background:rgba(120,140,255,.14);border:1px solid rgba(140,160,255,.28);font-size:13px}
+.crest span{flex:1 1 100%;color:var(--ink2)}.crest button{font-weight:700;color:var(--acc2);padding:4px 10px}
+.obx{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--gl)}
+.obx .ot{display:flex;flex-direction:column;gap:2px;min-width:0}.obx .ot b{font-size:15px}.obx .ot span{font-size:13px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis}
+.obx .oa{display:flex;gap:8px;flex:none}
+.arow{display:flex;align-items:center;gap:8px;margin-top:8px;padding:6px 8px 6px 14px;border-radius:20px}
+.arow .am{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:6px 0}
+.arow .an{display:flex;flex-direction:column;min-width:0}.arow .an b{font-size:15px;overflow-wrap:anywhere}.arow .an i{font-style:normal;font-size:12px;color:var(--ink2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sseg{margin-top:10px}.sseg button{flex:1}
+.chip.ss{display:inline-flex;align-items:center;padding:0}.chip.ss button{height:34px;padding:0 10px;font:inherit;color:inherit}.chip.ss button+button{padding:0 12px 0 0;color:var(--ink2)}
+.chip.op{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px}
+#sx .chips{margin-top:10px}
+#cwhen .cg{max-height:88vh;overflow:auto}#cwhen .org{padding:10px 6px}

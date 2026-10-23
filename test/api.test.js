@@ -471,3 +471,96 @@ test('kontakty: dodawanie z wieloma adresami, duplikat adresu odrzucony, edycja,
   assert.ok((await api('GET', '/api/contacts/people')).body.people.some((p) => p.email === 'marta@example.com'));
   assert.equal((await api('POST', '/api/contacts/hide', { email: 'zle' })).status, 400);
 });
+
+test('rozmowy: nagłówki i ta sama druga strona łączą, różne osoby i powiadomienia nie; lista zwija, gest dotyczy całej rozmowy', async () => {
+  const { db } = await import('../server/db.js'); const { storeMessages, threadKeyFor } = await import('../server/sync.js');
+  const acc = db.prepare('SELECT id,user_id FROM accounts WHERE provider=? ORDER BY id LIMIT 1').get('demo');
+  const T = Date.now() - 5 * 864e5; let n = 0;
+  const mk = (o) => ({ uid: 9100 + ++n, messageId: `<g${n}@t>`, fromName: 'X', fromAddr: 'x@example.org', toAddr: 'ty@example.com', subject: 'Temat', body: 'x', snippet: 'x', date: T + n * 1000, unread: true, hasAttach: false, ics: [], atts: [], html: '', unsub: false, bulk: false, ...o });
+  // trzy osoby, ten sam temat "Re:" => trzy osobne rozmowy
+  storeMessages(acc, [mk({ fromAddr: 'ala@example.org', subject: 'Re:' }), mk({ fromAddr: 'bob@example.org', subject: 'Sprawa wspólna' }), mk({ fromAddr: 'cezary@example.org', subject: 'Sprawa wspólna' }), mk({ fromAddr: 'bob@example.org', subject: 'Re: Sprawa wspólna' })]);
+  const row = (u) => db.prepare('SELECT id,thread_key k FROM messages WHERE uid=?').get(u);
+  assert.equal(row(9101).k, '', 'sam "Re:" bez nagłówków nie tworzy rozmowy');
+  assert.notEqual(row(9102).k, row(9103).k); assert.equal(row(9102).k, row(9104).k);
+  // odpowiedź z innego adresu, ale z nagłówkiem References, trafia do tej samej rozmowy
+  storeMessages(acc, [mk({ fromAddr: 'bob.prywatny@example.org', subject: 'Re: Sprawa wspólna', refs: '<g2@t>' })]);
+  assert.equal(row(9105).k, row(9102).k);
+  // newsletter nie tworzy rozmowy
+  storeMessages(acc, [mk({ fromAddr: 'news@sklep.example', subject: 'Promocja', bulk: true }), mk({ fromAddr: 'news@sklep.example', subject: 'Promocja', bulk: true })]);
+  assert.equal(row(9106).k, ''); assert.equal(row(9107).k, '');
+  // to samo od tej samej osoby po miesiącu to nowa rozmowa
+  assert.notEqual(threadKeyFor({ user_id: acc.user_id, account_id: acc.id, cat: 'inbox', from_addr: 'bob@example.org', to_addr: '', date: T + 60 * 864e5, id: 0 }, { subject: 'Sprawa wspólna' }), row(9102).k);
+  // lista: rozmowa Boba to jeden wiersz (najnowsza wiadomość), z licznikiem i nieprzeczytaniem
+  const list = (await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => /Sprawa/.test(x.subject));
+  const bob = list.filter((x) => x.from_addr.startsWith('bob')); assert.equal(bob.length, 1); assert.equal(bob[0].id, row(9105).id); assert.equal(bob[0].thread_n, 3); assert.equal(bob[0].unread, true);
+  assert.equal(list.filter((x) => x.from_addr === 'cezary@example.org').length, 1);
+  // otwarcie oznacza przeczytaną całą rozmowę, licznik w odpowiedzi
+  const r = await api('POST', `/api/messages/${row(9105).id}/read`, {}); assert.equal(r.body.count, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM messages WHERE uid IN (9102,9104,9105) AND unread=1").get().n, 0);
+  // gest na zwiniętym wierszu usuwa całą rozmowę, cofnięcie ją przywraca
+  const del = await api('POST', '/api/messages/act', { ids: [row(9105).id], action: 'delete', thread: true }); assert.equal(del.body.count, 3);
+  assert.ok(!(await api('GET', '/api/messages?tab=all&limit=100')).body.messages.some((x) => x.from_addr.startsWith('bob')));
+  await api('POST', '/api/messages/act', { ids: del.body.ids, action: 'restore' });
+  assert.equal((await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => x.from_addr.startsWith('bob')).length, 1);
+});
+
+test('kolejka wysyłki: cofnięcie, wysyłka później, błąd widoczny na liście, wypisanie się, brak odpowiedzi', async () => {
+  const { db } = await import('../server/db.js'); const { flushOutbox } = await import('../server/index.js');
+  const acc = db.prepare("SELECT id,user_id FROM accounts WHERE provider='demo' ORDER BY id LIMIT 1").get();
+  const body = { account_id: acc.id, to: 'ktos@example.org', subject: 'Test kolejki', text: 'Treść' };
+  const q = await api('POST', '/api/send', { ...body, delay_ms: 10000 }); assert.equal(q.body.queued, true);
+  assert.equal((await api('GET', '/api/outbox')).body.items.length, 1); assert.equal(await flushOutbox(), 0, 'przed czasem nic nie wychodzi');
+  const c = await api('POST', `/api/outbox/${q.body.id}/cancel`); assert.equal(c.body.payload.subject, 'Test kolejki'); assert.equal((await api('GET', '/api/outbox')).body.items.length, 0);
+  assert.equal((await api('POST', `/api/outbox/${q.body.id}/cancel`)).status, 404);
+  const q2 = await api('POST', '/api/send', { ...body, at: Date.now() + 3600e3 }); assert.ok(q2.body.send_at > Date.now() + 3500e3);
+  assert.equal(await flushOutbox(), 0); assert.equal(await flushOutbox(Date.now() + 7200e3), 1); assert.equal((await api('GET', '/api/outbox')).body.items.length, 0);
+  assert.equal((await api('POST', '/api/send', { ...body, to: 'zly', delay_ms: 5000 })).status, 400, 'błędy od razu, nie w kolejce');
+  const q3 = await api('POST', '/api/send', { ...body, delay_ms: 1 }); db.prepare("UPDATE outbox SET payload=replace(payload,'ktos@example.org','nie-adres') WHERE id=?").run(q3.body.id);
+  await flushOutbox(Date.now() + 1000); const f = (await api('GET', '/api/outbox')).body.items; assert.equal(f[0].state, 'failed'); assert.match(f[0].error, /adres/i);
+  await api('POST', `/api/outbox/${q3.body.id}/cancel`);
+  // wypisanie się z newslettera (konto demo)
+  const nl = db.prepare("SELECT id FROM messages WHERE from_addr LIKE 'info@members.netflix%' OR from_addr LIKE 'news@sklep-moda%' LIMIT 1").get();
+  assert.ok((await api('GET', `/api/messages/${nl.id}`)).body.message.unsub); assert.equal((await api('POST', `/api/messages/${nl.id}/unsubscribe`)).body.ok, true);
+  const plain = db.prepare("SELECT id FROM messages WHERE from_addr='marta@example.com'").get(); assert.equal((await api('POST', `/api/messages/${plain.id}/unsubscribe`)).status, 404);
+  // bez odpowiedzi: wysłana 5 dni temu rozmowa bez odpowiedzi, znika po odpowiedzi i po ukryciu
+  const { storeMessages } = await import('../server/sync.js'); const T = Date.now() - 5 * 864e5;
+  const mk = (u, o) => ({ uid: 9300 + u, messageId: `<f${u}@t>`, fromName: 'Ty', fromAddr: 'demo@poczta.local', toAddr: 'ola@example.org', subject: 'Oferta dla Was', body: 'x', snippet: 'x', date: T + u, unread: false, hasAttach: false, ics: [], atts: [], html: '', unsub: false, bulk: false, ...o });
+  db.prepare("INSERT INTO messages(user_id,account_id,folder,uid,message_id,from_addr,to_addr,subject,snippet,body,date,unread,cat,created_at,html_try,att_try,thread_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,'sent',?,2,1,?)").run(acc.user_id, acc.id, 'SENT', 9401, '<f1@t>', 'demo@poczta.local', 'ola@example.org', 'Oferta dla Was', 'x', 'x', T, Date.now(), 'oferta dla was|ola@example.org');
+  const fid = db.prepare('SELECT id FROM messages WHERE uid=9401').get().id;
+  assert.ok((await api('GET', '/api/followups')).body.items.some((x) => x.id === fid));
+  await api('POST', `/api/messages/${fid}/followup-off`); assert.ok(!(await api('GET', '/api/followups')).body.items.some((x) => x.id === fid));
+  db.prepare('UPDATE messages SET follow_off=0 WHERE id=?').run(fid);
+  storeMessages(acc, [{ ...mk(2), fromAddr: 'ola@example.org', toAddr: 'demo@poczta.local', subject: 'Re: Oferta dla Was', date: Date.now() - 864e5, refs: '<f1@t>', messageId: '<f2@t>' }]);
+  assert.ok(!(await api('GET', '/api/followups')).body.items.some((x) => x.id === fid), 'odpowiedź kasuje przypomnienie');
+});
+
+test('załączniki: lista i filtry; wyszukiwanie z operatorami i zapisane wyszukiwania', async () => {
+  const faktura = (await api('GET', '/api/attachments?q=fv')).body.items; assert.ok(faktura.length >= 1); assert.match(faktura[0].filename, /FV/);
+  assert.equal((await api('GET', '/api/attachments?kind=pdf')).body.items.length >= 1, true); assert.equal((await api('GET', '/api/attachments?kind=img')).body.items.length, 0);
+  assert.equal((await api('GET', '/api/attachments?q=nie-ma-takiego-pliku')).body.items.length, 0);
+  const s1 = (await api('GET', '/api/search?q=' + encodeURIComponent('ma:zalacznik'))).body.messages; assert.ok(s1.length >= 1 && s1.every((m) => m.has_attach));
+  const s2 = (await api('GET', '/api/search?q=' + encodeURIComponent('od:marta weekend'))).body.messages; assert.ok(s2.length >= 1 && s2.every((m) => /marta/i.test(m.from_addr)));
+  assert.equal((await api('GET', '/api/search?q=' + encodeURIComponent('od:marta faktura'))).body.messages.length, 0);
+  assert.ok((await api('GET', '/api/search?q=' + encodeURIComponent('jest:nieprzeczytane'))).body.messages.every((m) => m.unread));
+  assert.ok((await api('GET', '/api/search?q=' + encodeURIComponent('w:wyslane do:ola'))).body.messages.every((m) => m.cat === 'sent'));
+  const sv = await api('POST', '/api/saved-searches', { name: 'Faktury z PDF', query: 'faktura ma:zalacznik' }); assert.equal(sv.status, 200);
+  assert.equal((await api('POST', '/api/saved-searches', { query: 'faktura ma:zalacznik' })).status, 409);
+  assert.equal((await api('GET', '/api/saved-searches')).body.items.length, 1);
+  assert.equal((await api('DELETE', `/api/saved-searches/${sv.body.id}`)).status, 200); assert.equal((await api('GET', '/api/saved-searches')).body.items.length, 0);
+});
+
+test('przypomnienie o terminie płatności: raz, od 9:00, tylko dla otwartych', async () => {
+  const { db } = await import('../server/db.js'); const { remindDeadlines } = await import('../server/jobs.js');
+  const uid = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get().id;
+  db.prepare("INSERT INTO push_subs(user_id,endpoint,p256dh,auth,created_at) VALUES(?,?,?,?,?)").run(uid, 'https://push.example/rem', 'p', 'a', Date.now());
+  const mid = db.prepare('SELECT id FROM messages WHERE user_id=? LIMIT 1').get(uid).id;
+  const day = (d) => { const t = new Date(Date.now() + d * 864e5); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+  const ins = db.prepare("INSERT INTO found_items(user_id,message_id,kind,title,starts_at,amount,currency,confidence,source,evidence,status,created_at) VALUES(?,?,'deadline',?,?,?,'PLN',0.9,'t','e',?,?)");
+  const a = Number(ins.run(uid, mid, 'Do zapłaty Prąd: 120 zł', day(1), 120, 'new', Date.now()).lastInsertRowid), mid2 = db.prepare('SELECT id FROM messages WHERE user_id=? AND id!=? LIMIT 1').get(uid, mid).id, b = Number(ins.run(uid, mid2, 'Do zapłaty Woda', day(1), 50, 'paid', Date.now()).lastInsertRowid), c = Number(ins.run(uid, mid, 'Do zapłaty Gaz', day(5), 50, 'new', Date.now()).lastInsertRowid);
+  const nine = new Date(); nine.setHours(8, 0, 0, 0); const old = process.env.POCZTA_TZ; process.env.POCZTA_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.equal(remindDeadlines(nine), 0, 'przed 9:00 nic');
+  const noon = new Date(); noon.setHours(12, 0, 0, 0); remindDeadlines(noon);
+  const rem = (id) => db.prepare('SELECT reminded r FROM found_items WHERE id=?').get(id).r;
+  assert.equal(rem(a), 1); assert.equal(rem(b), 0); assert.equal(rem(c), 0); assert.equal(remindDeadlines(noon), 0, 'tylko raz');
+  if (old === undefined) delete process.env.POCZTA_TZ; else process.env.POCZTA_TZ = old;
+});

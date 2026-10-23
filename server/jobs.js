@@ -13,6 +13,22 @@ const zl = (n) => `${Number(n).toLocaleString('pl-PL', { maximumFractionDigits: 
 const plural = (n, a, b, c) => (n === 1 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? b : c);
 const hhmm = (s) => (s.includes('T') ? s.slice(11, 16) : '');
 
+// Przypomnienie o terminie płatności: raz, dzień przed i w dniu terminu, od 9:00 (poza ciszą nocną).
+export function remindDeadlines(now = new Date()) {
+  const { date, time } = parts(now); if (time < '09:00') return 0;
+  const tomorrow = addDay(date, 1); let sent = 0;
+  for (const { user_id: uid } of db.prepare('SELECT DISTINCT user_id FROM push_subs').all()) {
+    if (inQuiet(getPrefs(uid).quiet, now)) continue;
+    const due = db.prepare("SELECT id,title,amount,starts_at FROM found_items WHERE user_id=? AND kind='deadline' AND status='new' AND reminded=0 AND substr(starts_at,1,10) IN (?,?) ORDER BY starts_at LIMIT 5").all(uid, date, tomorrow);
+    for (const it of due) {
+      db.prepare('UPDATE found_items SET reminded=1 WHERE id=?').run(it.id);
+      const today = it.starts_at.slice(0, 10) === date;
+      sendToUser(uid, { title: today ? 'Dziś termin płatności' : 'Jutro termin płatności', body: `${it.title.replace(/^Do zapłaty [^:]*:\s*/i, '')}${it.amount ? ' · ' + zl(it.amount) : ''}`, url: './#/', tag: `due-${it.id}` }).catch(() => {}); sent++;
+    }
+  }
+  return sent;
+}
+
 export function wakeSnoozed(emit, now = Date.now()) {
   const rows = db.prepare('SELECT id,user_id,from_name,from_addr,subject FROM messages WHERE snoozed_until IS NOT NULL AND snoozed_until<=?').all(now);
   const byUser = new Map();
@@ -119,7 +135,7 @@ export function purgeOld(now = Date.now()) {
 export function startJobs(emit, hooks = {}) {
   let busy = false;
   const t = setInterval(async () => {
-    try { wakeSnoozed(emit); runDigests(); } catch { /* następny przebieg */ }
+    try { wakeSnoozed(emit); runDigests(); remindDeadlines(); } catch { /* następny przebieg */ }
     if (busy || !hooks.trash) return; busy = true;
     try { await flushTrash(hooks.trash); if (hooks.archive) await flushArchive(hooks.archive); purgeOld(); } catch { /* następny przebieg */ } finally { busy = false; }
   }, 30000);

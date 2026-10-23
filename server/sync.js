@@ -35,13 +35,30 @@ export const threadKey = (subject) => {
   t = t.replace(/\s+/g, ' ').trim();
   return t && t !== '(bez tematu)' ? t.slice(0, 200) : null;
 };
+// Rozmowa = ta sama nitka nagłówków (In-Reply-To / References) albo ten sam temat z tą samą drugą stroną w oknie 21 dni.
+// Powiadomienia, newslettery, oferty i spam nie tworzą rozmów (klucz pusty), tak samo wiadomości bez tematu.
+const WIN = 21 * 864e5, firstAddr = (s) => (String(s || '').match(/[^\s<>,;]+@[^\s<>,;]+/) || [''])[0].toLowerCase();
+const likeEsc = (s) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+export function threadKeyFor(r, m) {
+  if (['offers', 'spam', 'trash', 'blocked', 'other', 'drafts'].includes(r.cat) || m.bulk || m.unsub || m.unsubInfo) return '';
+  const refIds = [...new Set(String(m.refs || '').match(/<[^<>\s]+>/g) || [])].reverse().slice(0, 12);
+  const byMid = db.prepare("SELECT thread_key k FROM messages WHERE user_id=? AND account_id=? AND message_id=? AND thread_key IS NOT NULL AND thread_key!='' AND id!=? LIMIT 1");
+  for (const mid of refIds) { const x = byMid.get(r.user_id, r.account_id, mid, r.id || 0); if (x) return x.k; }
+  const subj = threadKey(m.subject); if (!subj) return '';
+  const party = firstAddr(r.cat === 'sent' ? r.to_addr : r.from_addr); if (!party) return '';
+  const base = `${subj}|${party}`;
+  const last = db.prepare("SELECT thread_key k, date d FROM messages WHERE user_id=? AND account_id=? AND (thread_key=? OR thread_key LIKE ? ESCAPE '\\') AND id!=? ORDER BY date DESC LIMIT 1").get(r.user_id, r.account_id, base, likeEsc(base) + '#%', r.id || 0);
+  if (!last) return base;
+  return Math.abs(r.date - last.d) <= WIN ? last.k : `${base}#${Math.floor(r.date / 864e5)}`;
+}
 function saveExtras(id, m) {
-  db.prepare('UPDATE messages SET cc_addr=?, refs=?, starred=?, thread_key=? WHERE id=?').run(m.ccAddr || null, m.refs || null, m.starred ? 1 : 0, threadKey(m.subject), id);
+  const r = db.prepare('SELECT id,user_id,account_id,cat,from_addr,to_addr,date FROM messages WHERE id=?').get(id);
+  db.prepare('UPDATE messages SET cc_addr=?, refs=?, starred=?, thread_key=?, unsub=? WHERE id=?').run(m.ccAddr || null, m.refs || null, m.starred ? 1 : 0, r ? threadKeyFor(r, m) : '', m.unsubInfo ? JSON.stringify(m.unsubInfo) : null, id);
 }
 export function backfillThreads() {
-  const rows = db.prepare('SELECT id,subject FROM messages WHERE thread_key IS NULL AND subject IS NOT NULL LIMIT 5000').all();
-  const up = db.prepare("UPDATE messages SET thread_key=? WHERE id=?");
-  tx(() => { for (const r of rows) up.run(threadKey(r.subject) ?? '', r.id); });
+  const rows = db.prepare('SELECT id,user_id,account_id,cat,from_addr,to_addr,date,refs,subject FROM messages WHERE thread_key IS NULL ORDER BY date LIMIT 5000').all();
+  const up = db.prepare('UPDATE messages SET thread_key=? WHERE id=?');
+  tx(() => { for (const r of rows) up.run(threadKeyFor(r, { refs: r.refs, subject: r.subject }), r.id); });
   return rows.length;
 }
 

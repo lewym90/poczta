@@ -95,6 +95,19 @@ const MIGRATIONS = [
    CREATE INDEX cemail_contact ON contact_emails(contact_id);`,
   `CREATE TABLE contact_hidden(
      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, PRIMARY KEY(user_id, email));`,
+  // nowe zasady rozmów (nagłówki + temat + druga strona): klucze liczone od nowa w tle
+  `UPDATE messages SET thread_key=NULL;`,
+  `ALTER TABLE messages ADD COLUMN unsub TEXT;
+   ALTER TABLE messages ADD COLUMN follow_off INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE found_items ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0;
+   CREATE TABLE outbox(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     send_at INTEGER NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', error TEXT,
+     subject TEXT, to_addr TEXT, created_at INTEGER NOT NULL);
+   CREATE INDEX outbox_due ON outbox(state, send_at);
+   CREATE TABLE saved_searches(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, query TEXT NOT NULL, created_at INTEGER NOT NULL);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

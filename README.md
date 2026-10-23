@@ -97,3 +97,16 @@ Zakładka **Kontakty** na dolnym pasku to własna książka adresowa każdej oso
 - Każdy adres (nadawca, odbiorcy, treść tekstowa, oryginał HTML, linki `mailto:`) jest klikalny: napisz, odpowiedz, dodaj/edytuj kontakt, kopiuj, zablokuj nadawcę.
 - Powiadomienia push używają nazwy z kontaktów.
 - Okna (nowa wiadomość, menu) zamykasz też przeciągnięciem w dół za uchwyt; niezapisana wiadomość pyta o szkic.
+
+## Codzienne udogodnienia (etap 7)
+
+- **Rozmowy zwinięte w jeden wiersz.** Rozmowę tworzą wiadomości powiązane nagłówkami (In-Reply-To / References) albo mające ten sam temat i tę samą drugą stronę w oknie 21 dni. Wiadomość bez tematu, samo „Re:”, newslettery, oferty i spam nie łączą się w rozmowy. Trzy osoby, ten sam temat = trzy rozmowy. Gest przeciągnięcia dotyczy całej rozmowy (z „Cofnij”), a otwarcie rozmowy oznacza ją jako przeczytaną.
+- **Wysyłka z cofnięciem i na później.** „Wyślij” kolejkuje wiadomość na 10 s (przycisk „Cofnij” wraca do edycji), zegar obok „Wyślij” planuje wysyłkę na wybraną godzinę. Zaplanowane widać w filtrze „Zaplanowane” (edycja, anulowanie, błędy wysyłki). Kolejka działa po stronie serwera, więc nie trzeba trzymać aplikacji otwartej.
+- **Wypisz się** jednym dotknięciem (List-Unsubscribe: jedno kliknięcie, wiadomość mailto albo otwarcie strony). Dotyczy wiadomości odebranych po tej aktualizacji.
+- **Bez odpowiedzi.** W zakładce Dziś: wysłane 3–45 dni temu rozmowy, na które nikt nie odpisał, z przyciskiem „Przypomnij się” (nowa wiadomość z cytatem) i „Nie przypominaj”.
+- **Szybkie odpowiedzi** („Dziękuję!”, „Potwierdzam.”, …) w oknie odpowiedzi i pod wiadomością.
+- **Lokalny zapis wersji roboczej** w telefonie co chwilę podczas pisania. Po zamknięciu aplikacji pojawia się „Niedokończona wiadomość · Przywróć”. To zapis na urządzeniu, a nie szkic w skrzynce (ten robi przycisk „Szkic”).
+- **Załączniki:** zakładka Szukaj → Załączniki, lista wszystkich plików z wyszukiwaniem po nazwie, nadawcy i temacie oraz filtrami PDF, Obrazy, Dokumenty.
+- **Wyszukiwanie z operatorami:** `od:`, `do:`, `ma:załącznik`, `jest:nieprzeczytane`, `jest:gwiazdka`, `w:wysłane|archiwum|wszystko`, a także zapisane wyszukiwania (inteligentne foldery).
+- **Sprawy:** filtry Wydarzenia, Terminy, Paczki.
+- **Przypomnienia o terminach płatności** (push): raz, dzień przed i w dniu terminu, od 9:00, poza ciszą nocną.

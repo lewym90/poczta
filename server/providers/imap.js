@@ -19,6 +19,14 @@ function htmlToText(html) {
     .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// List-Unsubscribe: adres https, mailto i znacznik jednego kliknięcia (RFC 8058)
+const unsubOf = (h) => {
+  const v = h?.get('list-unsubscribe'); if (!v) return null;
+  const s = typeof v === 'string' ? v : v.text || String(v);
+  const http = (s.match(/<(https?:\/\/[^>\s]+)>/i) || [])[1] || null, mailto = (s.match(/<(mailto:[^>\s]+)>/i) || [])[1] || null;
+  if (!http && !mailto) return null;
+  const post = h.get('list-unsubscribe-post'); return { http, mailto, one: !!http && /one-click/i.test(typeof post === 'string' ? post : post?.text || '') };
+};
 const INLINE_MAX = 400 * 1024;
 async function normalize(msg) {
   const p = await simpleParser(msg.source);
@@ -32,13 +40,14 @@ async function normalize(msg) {
   const body = (p.text || htmlToText(p.html || '')).replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
   const from = p.from?.value?.[0] || {};
   return {
-    uid: msg.uid, messageId: p.messageId || null, refs: [].concat(p.references || []).join(' ').slice(0, 2000) || null, ccAddr: (p.cc?.value || []).map((x) => x.address).filter(Boolean).join(', '), starred: !!msg.flags?.has('\\Flagged'),
+    uid: msg.uid, messageId: p.messageId || null, refs: [...new Set([].concat(p.references || [], p.inReplyTo || []))].join(' ').slice(0, 2000) || null, ccAddr: (p.cc?.value || []).map((x) => x.address).filter(Boolean).join(', '), starred: !!msg.flags?.has('\\Flagged'),
     fromName: from.name || from.address || '', fromAddr: from.address || '', toAddr: (p.to?.value || []).map((x) => x.address).join(', '),
     subject: p.subject || '(bez tematu)', body, snippet: body.replace(/\s+/g, ' ').slice(0, 160),
     date: (p.date || msg.internalDate || new Date()).getTime(), unread: !msg.flags?.has('\\Seen'),
     hasAttach: atts.some((a) => !a.inline), atts, ics,
     html: typeof p.html === 'string' ? p.html : '',
     unsub: !!p.headers?.get('list-unsubscribe'),
+    unsubInfo: unsubOf(p.headers),
     bulk: /^(bulk|list|junk)$/i.test(String(p.headers?.get('precedence') || '')) || !!p.headers?.get('list-id') || !!p.headers?.get('x-campaign') || !!p.headers?.get('x-mailchimp-id') || !!p.headers?.get('feedback-id'),
   };
 }

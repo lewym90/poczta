@@ -166,7 +166,7 @@ function msgRow(m, i) {
   const snz = m.snoozed_until > Date.now() ? `<span class="cp snz">${ic('clock', 'i14')}Wraca ${esc(snzLabel(new Date(m.snoozed_until)))}</span>` : '';
   const why = !snz && m.cat && m.cat !== 'inbox' && m.cat_why && m.risk < 2 ? `<span class="cp snz">${ic('tag', 'i14')}${esc(m.cat_why)}</span>` : '';
   const chip = snz || why || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
-  return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
+  return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" data-tn="${m.thread_n || 0}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_addr)}">${esc(initials(m.cat === 'sent' || m.cat === 'drafts' ? (addrList(m.to_addr).map((a) => cn(a))[0] || m.to_addr) : dispName(m.from_addr, m.from_name)))}</div></div>
     <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : esc(dispName(m.from_addr, m.from_name))}</span></span><span class="tm mono">${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
     <div class="sj">${m.thread_n > 1 ? `<span class="thn mono">${m.thread_n}</span>` : ''}${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : ''}</div></button>`;
@@ -190,7 +190,7 @@ async function viewInbox() {
     [msgs, today, pay] = await Promise.all([get('/api/messages?' + q), get('/api/today'), S.seg === 'pay' ? get('/api/obligations') : null]);
     cacheSet('inbox', { msgs, today }); S.offline = false;
   } catch (e) { if (e.status) throw e; const c = cacheGet('inbox'); if (!c) throw e; ({ msgs, today } = c); S.offline = true; }
-  S.unread = msgs.unread; S.counts = msgs.counts || {}; badge(); await loadAccounts(true);
+  S.unread = msgs.unread; S.counts = msgs.counts || {}; S.outbox = msgs.outbox || 0; badge(); await loadAccounts(true);
   const pend = today.items.filter((i) => i.status === 'new');
   const ev = pend.filter((i) => i.kind !== 'deadline').length, dl = pend.length - ev;
   const accLabel = S.account ? (S.accounts.find((a) => a.id === S.account)?.label || 'Konto') : 'Wszystkie konta';
@@ -233,7 +233,7 @@ async function loadMore(btn) {
 }
 function chipsHtml(c = {}) {
   const k = (id, l, n, cls = '') => `<button class="chip ${cls}" data-filter="${id}" aria-pressed="${S.filter === id}">${l}${n ? `<b class="cn mono" id="cnt-${id}">${n}</b>` : ''}</button>`;
-  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + ((S.accounts || []).some((a) => a.provider === 'imap') ? `<button class="chip" data-act="folders">Foldery…</button>` : '');
+  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (S.outbox ? `<button class="chip" data-act="outbox">Zaplanowane<b class="cn mono">${S.outbox}</b></button>` : '') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + ((S.accounts || []).some((a) => a.provider === 'imap') ? `<button class="chip" data-act="folders">Foldery…</button>` : '');
 }
 function bulkHtml(m) {
   const f = S.filter, n = (m.counts || {})[f];
@@ -254,12 +254,15 @@ function emptyNoAccount() {
   return `<div class="empty gl" style="border-radius:28px;margin-top:16px;padding:30px 20px"><div class="big ser">Dodaj pierwszą skrzynkę</div>Poczta działa z Gmailem, iCloud, Outlookiem, WP, Onetem, O2 i każdą skrzynką z IMAP.<div class="actions" style="justify-content:center"><button class="btn pri" data-go="#/accounts">${ic('plus', 'i18')}Dodaj konto</button></div></div>`;
 }
 
-function casesHtml(items) {
-  if (!items.length) return `<div class="empty"><div class="big ser">Czysto</div>Brak nowych spraw. Poczta szuka terminów w każdej nowej wiadomości.</div>`;
+function casesHtml(all) {
+  if (!all.length) return `<div class="empty"><div class="big ser">Czysto</div>Brak nowych spraw. Poczta szuka terminów w każdej nowej wiadomości.</div>`;
+  const kinds = [['all', 'Wszystko'], ['event', 'Wydarzenia'], ['deadline', 'Terminy'], ['parcel', 'Paczki']], have = new Set(all.map((i) => i.kind)), f = S.ck && have.has(S.ck) ? S.ck : 'all';
+  const items = f === 'all' ? all : all.filter((i) => i.kind === f);
+  const filt = have.size > 1 ? `<div class="chips" role="group" aria-label="Rodzaj spraw">${kinds.filter((k) => k[0] === 'all' || have.has(k[0])).map((k) => `<button class="chip" data-ck="${k[0]}" aria-pressed="${f === k[0]}">${k[1]}${k[0] === 'all' ? '' : `<b class="cn mono">${all.filter((i) => i.kind === k[0]).length}</b>`}</button>`).join('')}</div>` : '';
   const groups = {};
   for (const it of items) { const d = dayDiff(parseLocal(it.starts_at), new Date()); const g = d <= 0 ? 'Dziś' : d === 1 ? 'Jutro' : d < 8 ? 'W tym tygodniu' : 'Później'; (groups[g] ||= []).push(it); }
   let i = 3;
-  return ['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('');
+  return filt + ['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('');
 }
 function caseCard(it, i = 0) {
   return `<div class="card gl" style="--i:${i}"><div class="k mono">${ic(KIND_ICON[it.kind], 'i14')}${KIND_LABEL[it.kind]}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>
@@ -280,7 +283,7 @@ function payHtml(o) {
   ${o.paid.length ? `<div class="sec">Opłacone w tym miesiącu · ${fmt(o.paid_total)}</div>${o.paid.map((x) => `<div class="kv paid"><span>${esc(x.title)}</span><span>${x.amount ? esc(money(x)) : ''} <button class="link" data-unpaid="${x.id}">cofnij</button></span></div>`).join('')}` : ''}`;
 }
 
-async function actMsgs(ids, action, scope) { return post('/api/messages/act', { ids, action, scope }); }
+async function actMsgs(ids, action, scope, thread) { return post('/api/messages/act', { ids, action, scope, thread: thread || undefined }); }
 const freemail = /^(gmail\.com|wp\.pl|o2\.pl|onet\.pl|op\.pl|interia\.pl|poczta\.fm|icloud\.com|me\.com|outlook\.com|hotmail\.com|yahoo\.com|gmx\.(com|net)|proton\.me|protonmail\.com|live\.com|tlen\.pl)$/i;
 function orgSheet(m) {
   const dom = String(m.from_addr || '').split('@')[1] || '';
@@ -296,8 +299,8 @@ function orgSheet(m) {
     <div class="actions"><button class="btn grow" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}">${ic('clock', 'i18')}Odłóż na później</button><button class="btn" data-act="close">Anuluj</button></div></div>`);
 }
 const ORG_MSG = { archive: 'Zarchiwizowano', unrule: 'Przywrócono', unarchive: 'Wróciło do skrzynki', star: 'Oznaczono', unstar: 'Usunięto oznaczenie', delete: 'Usunięto', spam: 'Przeniesiono do Spamu · nadawca już zawsze tam trafi', offers: 'Przeniesiono do Ofert', inbox: 'Wróciło do skrzynki', block: 'Nadawca zablokowany · nie pokaże się nigdzie' };
-async function orgDo(ids, action, scope, { after } = {}) {
-  const r = await actMsgs(ids, action, scope); closeSheet();
+async function orgDo(ids, action, scope, { after, thread } = {}) {
+  const r = await actMsgs(ids, action, scope, thread); closeSheet();
   const undo = action === 'delete' || action === 'archive' || action === 'spam' || action === 'offers' || action === 'block' ? { label: 'Cofnij', fn: async () => { await restoreMsgs(r.ids, action); toast('Przywrócono'); route(); } } : null;
   toast(`${ORG_MSG[action]}${r.count > 1 ? ` (${r.count})` : ''}`, undo);
   return r;
@@ -357,7 +360,7 @@ function mountFrame(doc) {
 async function viewMessage(id) {
   const pre = S.pre?.get(+id); S.pre?.delete(+id);
   const { message: m, items } = pre && Date.now() - pre.t < 120000 && S.forceImg !== +id ? pre.r : await get(`/api/messages/${id}${S.forceImg === +id ? '?images=1' : ''}`);
-  if (m.unread) post(`/api/messages/${id}/read`).then(() => { S.unread = Math.max(0, S.unread - 1); badge(); }).catch(() => {});
+  if (m.unread || m.thread?.some((t) => t.unread)) post(`/api/messages/${id}/read`).then((r) => { S.unread = Math.max(0, S.unread - (r?.count ?? 1)); badge(); }).catch(() => {});
   const risky = m.risk >= 2, own = m.cat === 'sent' || m.cat === 'drafts';
   const framed = !!m.frame, html = framed && (cacheGet('mode') || 'html') !== 'text';
   const d = new Date(m.date);
@@ -369,6 +372,7 @@ async function viewMessage(id) {
     <div class="meta"><div class="a ${hue(own ? m.to_addr : m.from_addr)}">${esc(initials(own ? (addrList(m.to_addr).map((a) => cn(a))[0] || m.to_addr) : dispName(m.from_addr, m.from_name)))}</div><div class="w"><div class="n">${own ? `Do: ${esc(toNames(m.to_addr) || '(brak adresata)')}` : `<button type="button" class="ea nb" data-ea="${esc(m.from_addr)}" data-ean="${esc(m.from_name || '')}">${esc(dispName(m.from_addr, m.from_name))}</button>`}</div><div class="d mono">${own ? `z ${esc(m.account_email)}` : eaBtn(m.from_addr, m.from_name)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div><button class="round gl star" data-star="${m.id}" aria-pressed="${!!m.starred}" aria-label="Oznacz gwiazdką">${ic('star', m.starred ? 'on' : '')}</button></div>
     ${own ? '' : recipLine('Do', m.to_addr)}${recipLine('Dw', m.cc_addr)}${own ? recipLine('Do', m.to_addr) : ''}
     ${m.cat && m.cat !== 'inbox' && !risky ? `<div class="fbanner gl"><div><b>${FOLDER_NAME[m.cat] || 'Poza skrzynką'}</b>${m.cat_why ? ` · ${esc(m.cat_why)}` : ''}</div><button class="btn" data-orgact="inbox" data-orgid="${m.id}">To nie ${m.cat === 'spam' ? 'spam' : 'oferta'}</button></div>` : ''}
+    ${m.unsub ? `<div class="fbanner gl"><div>Newsletter</div><button class="btn" data-unsub="${m.id}">Wypisz się</button></div>` : ''}
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
     ${attHtml(m)}
@@ -377,6 +381,7 @@ async function viewMessage(id) {
     ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${rich(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
       : `<div class="body ${risky ? 'dim' : ''}" id="body">${rich(m.body)}</div>`}
     <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('send', 'i18')}Odpowiedz</button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">Odpowiedz wszystkim</button>` : ''}<button class="btn" data-cmp="forward">Przekaż dalej</button></div>
+    ${own || risky ? '' : `<div class="qrow">${QUICK.map((q) => `<button class="chip" data-qr="${esc(q)}">${esc(q)}</button>`).join('')}</div>`}
     ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(toNames(String(t.to_addr || '').split(',')[0])) : esc(dispName(t.from_addr, t.from_name))} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
   S.cur = { m, items };
   if (html) mountFrame(m.frame);
@@ -386,7 +391,7 @@ async function viewMessage(id) {
 }
 
 async function viewToday() {
-  const t = await get('/api/today'); S.unread = t.unread; badge();
+  const [t, fu] = await Promise.all([get('/api/today'), get('/api/followups').then((r) => r.items).catch(() => [])]); S.unread = t.unread; badge();
   const now = new Date(), h = now.getHours(), hello = h < 5 ? 'Dobranoc' : h < 12 ? 'Dzień dobry' : h < 18 ? 'Miłego popołudnia' : 'Dobry wieczór';
   const groups = {};
   for (const it of t.items) { const d = dayDiff(parseLocal(it.starts_at), now); const g = d <= 0 ? 'Dziś' : d === 1 ? 'Jutro' : d < 8 ? 'W tym tygodniu' : 'Później'; (groups[g] ||= []).push(it); }
@@ -395,20 +400,54 @@ async function viewToday() {
     <h1 class="ser" style="margin:14px 8px 4px;font-size:52px;line-height:52px;letter-spacing:-.025em">${hello}.</h1>
     <p style="margin:0 8px 6px;color:var(--ink2);font-size:16px;line-height:23px">${t.unread ? `<b style="color:var(--ink)">${t.unread}</b> nieprzeczytanych, ` : ''}${t.pending ? `<b style="color:var(--ink)">${t.pending}</b> spraw do ogarnięcia.` : 'żadnych spraw na horyzoncie.'}</p>
     ${heroHtml(t)}
+    ${fu.length ? `<div class="sec">Bez odpowiedzi</div>${fu.slice(0, 5).map((f, k) => fuCard(f, k + 2)).join('')}` : ''}
     ${['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('') || '<div class="empty"><div class="big ser">Spokojny dzień</div>Nic nie wymaga uwagi.</div>'}`, { fab: true });
   nav('today');
 }
 
+const OPS = ['ma:załącznik', 'jest:nieprzeczytane', 'jest:gwiazdka', 'w:wysłane', 'w:archiwum', 'w:wszystko'];
 async function viewSearch() {
-  paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Szukaj</span></div><label class="srch gl">${ic('search', 'i18')}<input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" placeholder="np. faktura, kardiolog, Marta" aria-label="Szukaj w poczcie"></label><div class="list" id="res"><div class="empty"><div class="big ser">Wpisz coś</div>Szukam w tematach, nadawcach i treści. Działa bez polskich znaków.</div></div>`);
+  const att = S.sm === 'att', kinds = [['', 'Wszystkie'], ['pdf', 'PDF'], ['img', 'Obrazy'], ['doc', 'Dokumenty']];
+  paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Szukaj</span></div>
+    <label class="srch gl">${ic('search', 'i18')}<input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" placeholder="${att ? 'nazwa pliku, nadawca, temat' : 'np. faktura, kardiolog, Marta'}" aria-label="Szukaj w poczcie"></label>
+    <div class="seg gl sseg"><button data-sm="msg" aria-pressed="${!att}">Wiadomości</button><button data-sm="att" aria-pressed="${att}">Załączniki</button></div>
+    <div id="sx"></div><div class="list" id="res"></div>`);
   nav('search');
-  const q = $('#q'); let t, seq = 0;
-  q.oninput = () => { clearTimeout(t); t = setTimeout(async () => {
-    const my = ++seq, v = q.value.trim(); if (v.length < 2) return;
+  const q = $('#q'); let t, seq = 0, saved = [];
+  const aRow = (a, i) => { const view = /^(image\/(png|jpe?g|gif|webp|avif)|application\/pdf)$/i.test(a.ctype);
+    return `<div class="arow gl" style="--i:${i}"><a class="am" href="api/messages/${a.mid}/att/${a.idx}${view ? '?view=1' : ''}" ${view ? 'target="_blank" rel="noopener"' : `download="${esc(a.filename)}"`}>${ic(view ? 'file' : 'clip', 'i18')}<span class="an"><b>${esc(a.filename)}</b><i class="mono">${fmtSize(a.size)} · ${a.cat === 'sent' ? 'do ' + esc(toNames(a.to_addr)) : 'od ' + esc(dispName(a.from_addr, a.from_name))} · ${fmtTime(a.date)}</i></span></a><button class="btn" data-open="${a.mid}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button></div>`; };
+  const drawX = () => {
+    $('#sx').innerHTML = att
+      ? `<div class="chips">${kinds.map((k) => `<button class="chip" data-sk="${k[0]}" aria-pressed="${(S.sk || '') === k[0]}">${k[1]}</button>`).join('')}</div>`
+      : `${saved.length ? `<div class="chips">${saved.map((x) => `<span class="chip ss"><button data-ssq="${esc(x.query)}">${esc(x.name)}</button><button data-ssdel="${x.id}" aria-label="Usuń zapisane wyszukiwanie">×</button></span>`).join('')}</div>` : ''}
+        <div class="chips">${OPS.map((o) => `<button class="chip op" data-op="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+  };
+  const run = async () => {
+    const my = ++seq, v = q.value.trim();
+    if (att) {
+      const r = await get(`/api/attachments?q=${encodeURIComponent(v)}&kind=${S.sk || ''}`).catch(() => null); if (!r || my !== seq) return;
+      $('#res').innerHTML = r.items.length ? r.items.map(aRow).join('') : `<div class="empty"><div class="big ser">Brak załączników</div>${v || S.sk ? 'Spróbuj innego pliku lub filtra.' : 'Pliki z wiadomości pojawią się tutaj.'}</div>`; return;
+    }
+    if (!v) { $('#res').innerHTML = `<div class="empty"><div class="big ser">Wpisz coś</div>Szukam w tematach, nadawcach i treści, także bez polskich znaków.<br><span style="font-size:13px">Operatory: <b>od:</b>ola <b>do:</b>ola <b>ma:</b>załącznik <b>jest:</b>nieprzeczytane <b>w:</b>wysłane</span></div>`; return; }
+    if (v.length < 2 && !/:/.test(v)) return;
     const r = await get('/api/search?q=' + encodeURIComponent(v)).catch(() => null); if (!r || my !== seq) return;
-    $('#res').innerHTML = r.messages.length ? r.messages.map(msgRow).join('') : `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`;
-  }, 180); };
-  q.focus();
+    $('#res').innerHTML = (r.messages.length ? r.messages.map(msgRow).join('') : `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`)
+      + (!saved.some((x) => x.query === v) ? `<button class="lnk" type="button" id="ssave" style="margin:12px 8px 0">+ Zapisz to wyszukiwanie</button>` : '');
+  };
+  q.oninput = () => { clearTimeout(t); t = setTimeout(run, 180); };
+  $('.sseg').onclick = (e) => { const b = e.target.closest('[data-sm]'); if (b && b.dataset.sm !== (att ? 'att' : 'msg')) { S.sm = b.dataset.sm; S.sq = ''; S.animate = false; route(); } };
+  $('#sx').onclick = async (e) => {
+    const k = e.target.closest('[data-sk]'), o = e.target.closest('[data-op]'), s = e.target.closest('[data-ssq]'), d = e.target.closest('[data-ssdel]');
+    if (k) { S.sk = k.dataset.sk; S.sq = q.value; S.animate = false; route(); }
+    else if (o) { q.value = (q.value.trim() + ' ' + o.dataset.op + ' ').trim() + ' '; q.focus(); run(); }
+    else if (s) { q.value = s.dataset.ssq; run(); }
+    else if (d) { await api('DELETE', `/api/saved-searches/${d.dataset.ssdel}`).catch(() => {}); saved = saved.filter((x) => x.id !== +d.dataset.ssdel); drawX(); run(); }
+  };
+  $('#res').addEventListener('click', (e) => { if (e.target.closest('#ssave')) saveSearchSheet(q.value.trim()); });
+  q.value = S.sq || ''; S.sq = '';
+  drawX(); run();
+  if (!att) get('/api/saved-searches').then((r) => { saved = r.items; drawX(); if (q.value) run(); }).catch(() => {});
+  if (!q.value) q.focus();
 }
 
 async function viewAccounts() {
@@ -564,12 +603,18 @@ async function composeSheet(opts = {}) {
   const mine = new Set(accs.map((a) => a.email.toLowerCase()));
   const uniq = (l) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
   const split = (v) => String(v || '').split(/[,;]\s*/);
-  let to = opts.to || '', cc = '', subject = '', text = '', inReply = '', refs = '', fwd = 0, draftId = 0, accId = m?.account_id || S.account || accs[0].id;
+  let to = opts.to || '', cc = '', bcc0 = '', subject = '', text = '', inReply = '', refs = '', fwd = 0, draftId = 0, accId = m?.account_id || S.account || accs[0].id;
   const sig = S.sig ? `\n\n-- \n${S.sig}` : '';
   if (mode === 'reply' || mode === 'replyall') {
     to = m.from_addr; subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`; inReply = m.message_id || ''; refs = uniq([m.refs, m.message_id].filter(Boolean)).join(' ');
     if (mode === 'replyall') cc = uniq([...split(m.to_addr), ...split(m.cc_addr)]).filter((x) => !mine.has(x.toLowerCase()) && x.toLowerCase() !== String(m.from_addr).toLowerCase()).join(', ');
     text = `${sig}\n\nW dniu ${fmtDT(m.date)} ${m.from_name || m.from_addr} napisał(a):\n${String(m.body || '').split('\n').slice(0, 40).map((l) => '> ' + l).join('\n')}`;
+  } else if (mode === 'nudge') {
+    to = m.to_addr || ''; subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`; inReply = m.message_id || ''; refs = uniq([m.refs, m.message_id].filter(Boolean)).join(' ');
+    text = `${sig}\n\nW dniu ${fmtDT(m.date)} napisałem(am):\n${String(m.body || '').split('\n').slice(0, 40).map((l) => '> ' + l).join('\n')}`;
+  } else if (mode === 'restore') {
+    const p = opts.p || {}; accId = p.account_id || accId; to = p.to || ''; cc = p.cc || ''; bcc0 = p.bcc || ''; subject = p.subject || ''; text = p.text || '';
+    inReply = p.in_reply_to || ''; refs = p.references || ''; fwd = p.forward_of || 0; draftId = p.draft_id || 0;
   } else if (mode === 'forward') {
     subject = /^(fwd?|pd):/i.test(m.subject) ? m.subject : `Fwd: ${m.subject}`; fwd = m.id;
     text = `${sig}\n\n---------- Przekazana wiadomość ----------\nOd: ${m.from_name ? m.from_name + ' ' : ''}<${m.from_addr}>\nData: ${fmtDT(m.date)}\nTemat: ${m.subject}\nDo: ${m.to_addr}\n\n${m.body || ''}`;
@@ -577,22 +622,28 @@ async function composeSheet(opts = {}) {
     to = m.to_addr || ''; cc = m.cc_addr || ''; subject = m.subject || ''; text = m.body || ''; draftId = m.id;
   } else if (mode === 'again') { to = m.to_addr || ''; cc = m.cc_addr || ''; subject = m.subject || ''; text = m.body || ''; }
   else text = sig;
+  if (opts.quick) text = opts.quick + text;
   const files = [];
-  const title = { new: 'Nowa wiadomość', reply: 'Odpowiedz', replyall: 'Odpowiedz wszystkim', forward: 'Przekaż dalej', draft: 'Szkic', again: 'Nowa wiadomość' }[mode];
+  if (mode === 'restore') for (const a of opts.p?.attachments || []) files.push({ name: a.name, type: a.type, size: Math.floor((a.data || '').length * 3 / 4), data: a.data });
+  const title = { new: 'Nowa wiadomość', reply: 'Odpowiedz', replyall: 'Odpowiedz wszystkim', forward: 'Przekaż dalej', draft: 'Szkic', again: 'Nowa wiadomość', nudge: 'Przypomnienie', restore: 'Edytuj wiadomość' }[mode];
   const total = () => files.reduce((n, f) => n + f.size, 0);
   sheet(`<h2>${title}</h2><form id="cf"><div class="fld"><label for="cfr">Z konta</label><select class="in" id="cfr">${accs.map((a) => `<option value="${a.id}" ${accId === a.id ? 'selected' : ''}>${esc(a.email)}</option>`).join('')}</select></div>
     ${rcptHtml('cto', 'Do')}
-    <div id="ccbox" ${cc ? '' : 'hidden'}>${rcptHtml('ccc', 'Dw')}${rcptHtml('cbc', 'UDW')}</div>
-    ${cc ? '' : '<button class="lnk" type="button" id="showcc">Dw / UDW</button>'}
+    <div id="ccbox" ${cc || bcc0 ? '' : 'hidden'}>${rcptHtml('ccc', 'Dw')}${rcptHtml('cbc', 'UDW')}</div>
+    ${cc || bcc0 ? '' : '<button class="lnk" type="button" id="showcc">Dw / UDW</button>'}
     <div class="fld"><label for="csu">Temat</label><input class="in" id="csu" value="${esc(subject)}"></div>
+    ${['reply', 'replyall', 'nudge'].includes(mode) ? `<div class="qrow" id="cqr">${QUICK.map((q) => `<button type="button" class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" rows="9">${esc(text)}</textarea></div>
     <div class="cfiles" id="cfiles"></div>
     <div class="err" id="err" role="alert"></div>
-    <div class="actions cact" style="margin-top:12px"><label class="btn" style="cursor:pointer">${ic('clip', 'i18')}Załącznik<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Szkic</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
-    const R = { to: mountRcpt(sh, 'cto', to), cc: mountRcpt(sh, 'ccc', cc), bcc: mountRcpt(sh, 'cbc', '') };
+    <div class="actions cact" style="margin-top:12px"><label class="btn" style="cursor:pointer" aria-label="Dodaj załącznik">${ic('clip', 'i18')}<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Szkic</button><button class="btn" type="button" id="clater" aria-label="Wyślij później">${ic('clock', 'i18')}</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
+    const R = { to: mountRcpt(sh, 'cto', to), cc: mountRcpt(sh, 'ccc', cc), bcc: mountRcpt(sh, 'cbc', bcc0) };
     if (!S.people) get('/api/contacts/people').then((r) => { S.people = r.people; }).catch(() => { S.people = []; });
     const ta = $('#ctx', sh); ta.setSelectionRange(0, 0); setTimeout(() => (mode === 'new' || mode === 'draft' || mode === 'again' ? $('#cto', sh) : ta).focus(), 450);
+    const paintFilesLater = () => paintFiles();
     const paintFiles = () => { $('#cfiles', sh).innerHTML = files.map((f, i) => `<span class="cfile gl">${ic('clip', 'i14')}<span>${esc(f.name)} · ${fmtSize(f.size)}</span><button type="button" data-rmf="${i}" aria-label="Usuń załącznik">${ic('x', 'i14')}</button></span>`).join(''); };
+    if (files.length) paintFilesLater();
+    $('#cqr', sh)?.addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; const q = b.dataset.q; if (!ta.value.includes(q)) { const nl = ta.value.indexOf('\n'), p = ta.value.startsWith('\n') ? 0 : nl < 0 ? ta.value.length : nl; ta.value = ta.value.slice(0, p) + (p > 0 ? ' ' : '') + q + ta.value.slice(p); ta.dispatchEvent(new Event('input', { bubbles: true })); } ta.focus(); });
     $('#showcc', sh)?.addEventListener('click', (e) => { $('#ccbox', sh).hidden = false; e.currentTarget.remove(); $('#ccc', sh).focus(); });
     $('#cfiles', sh).addEventListener('click', (e) => { const b = e.target.closest('[data-rmf]'); if (b) { files.splice(+b.dataset.rmf, 1); paintFiles(); } });
     const readFile = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(f); });
@@ -609,26 +660,52 @@ async function composeSheet(opts = {}) {
     const snap = () => JSON.stringify([R.to.get(), R.cc.get(), R.bcc.get(), $('#csu', sh).value, ta.value]);
     const initial = snap();
     const dirty = () => snap() !== initial || files.length > 0;
+    // lokalny zapis wersji roboczej na urządzeniu: przetrwa zamknięcie aplikacji, odzyskasz go przy kolejnym otwarciu
+    const akey = `${mode}:${m?.id || ''}`, useAuto = mode !== 'restore' && !(mode === 'new' && opts.to);
+    const clearAuto = () => autoDel(akey);
+    let at0;
+    const saveAuto = () => { if (!useAuto) return; if (snap() === initial) { autoDel(akey); return; } autoSet(akey, { to: R.to.get(), cc: R.cc.get(), bcc: R.bcc.get(), subject: $('#csu', sh).value, text: ta.value, acc: +$('#cfr', sh).value, t: Date.now() }); };
+    sh.addEventListener('input', () => { clearTimeout(at0); at0 = setTimeout(saveAuto, 700); });
+    const a0 = useAuto && autoGet(akey);
+    if (a0 && Date.now() - a0.t < 7 * 864e5 && (a0.text || a0.subject || a0.to)) {
+      $('#cf', sh).insertAdjacentHTML('afterbegin', `<div class="crest"><span>Niedokończona wiadomość z ${esc(fmtDT(a0.t))}</span><button type="button" data-ar="y">Przywróć</button><button type="button" data-ar="n">Usuń</button></div>`);
+      $('.crest', sh).addEventListener('click', (e) => {
+        const y = e.target.closest('[data-ar]')?.dataset.ar; if (!y) return;
+        if (y === 'y') { R.to.set(a0.to); R.cc.set(a0.cc); R.bcc.set(a0.bcc); if (a0.cc || a0.bcc) { $('#ccbox', sh).hidden = false; $('#showcc', sh)?.remove(); } $('#csu', sh).value = a0.subject || ''; ta.value = a0.text || ''; if (a0.acc && $(`#cfr option[value="${a0.acc}"]`, sh)) $('#cfr', sh).value = a0.acc; }
+        else autoDel(akey);
+        e.currentTarget.remove();
+      });
+    }
     S.sheetGuard = () => {
       if (!dirty()) return true;
       if ($('#cguard')) return false;
       $('#sheet-root').insertAdjacentHTML('beforeend', `<div id="cguard" class="cguard"><div class="cg gl"><b>Zapisać szkic?</b><span>Wiadomość nie została wysłana.</span><div class="actions"><button class="btn pri grow" type="button" data-g="save">Zapisz szkic</button><button class="btn warn" type="button" data-g="drop">Odrzuć</button><button class="btn" type="button" data-g="back">Wróć</button></div></div></div>`);
       $('#cguard').onclick = (e) => {
         const g = e.target.closest('[data-g]')?.dataset.g; if (!g) return;
-        if (g === 'back') $('#cguard').remove(); else if (g === 'drop') closeSheet(); else { $('#cguard').remove(); $('#cdraft', sh).click(); }
+        if (g === 'back') $('#cguard').remove(); else if (g === 'drop') { clearAuto(); closeSheet(); } else { $('#cguard').remove(); $('#cdraft', sh).click(); }
       };
       return false;
     };
     $('#cdraft', sh).onclick = async (ev) => {
       const b = ev.currentTarget; b.disabled = true; $('#err', sh).textContent = '';
-      try { await post('/api/drafts', { ...payload(), replace_id: draftId || undefined }); closeSheet(); toast('Zapisano szkic'); if (location.hash.startsWith('#/m/') && draftId) go('#/'); else if (S.filter === 'drafts') route(); }
+      try { await post('/api/drafts', { ...payload(), replace_id: draftId || undefined }); clearAuto(); closeSheet(); toast('Zapisano szkic'); if (location.hash.startsWith('#/m/') && draftId) go('#/'); else if (S.filter === 'drafts') route(); }
       catch (e) { $('#err', sh).textContent = e.message; b.disabled = false; }
+    };
+    // wysyłka idzie przez kolejkę: kilka sekund na „Cofnij”, albo o wybranej godzinie
+    const queue = async (extra, msg, ms) => {
+      if (!R.to.get() && !R.cc.get() && !R.bcc.get()) { $('#err', sh).textContent = 'Podaj adresata'; return false; }
+      const r = await post('/api/send', { ...payload(), draft_id: draftId || undefined, ...extra });
+      clearAuto(); closeSheet(); undoToast(r, msg, ms); if (draftId) go('#/'); return true;
     };
     $('#cf', sh).onsubmit = async (ev) => {
       ev.preventDefault(); const b = ev.submitter; b.disabled = true; $('#err', sh).textContent = '';
-      if (!R.to.get() && !R.cc.get() && !R.bcc.get()) { $('#err', sh).textContent = 'Podaj adresata'; b.disabled = false; return; }
-      try { await post('/api/send', { ...payload(), draft_id: draftId || undefined }); closeSheet(); toast('Wysłano'); if (draftId) go('#/'); }
+      try { if (!(await queue({ delay_ms: 10000 }, 'Wysyłam za chwilę', 9800))) b.disabled = false; }
       catch (e) { $('#err', sh).textContent = e.message; b.disabled = false; }
+    };
+    $('#clater', sh).onclick = () => {
+      $('#err', sh).textContent = '';
+      if (!R.to.get() && !R.cc.get() && !R.bcc.get()) { $('#err', sh).textContent = 'Podaj adresata'; return; }
+      whenOverlay(async (at, label) => { try { await queue({ at }, `Zaplanowano: ${label}`, 7000); } catch (e) { $('#err', sh).textContent = e.message; } });
     };
   });
 }
@@ -768,7 +845,8 @@ function mountRcpt(sh, id, initial) {
   const box = $(`[data-rf="${id}"]`, sh), inp = $('input', box), sug = box.parentElement.querySelector('.sug'), chips = [];
   const chipHtml = (a) => `<span class="rc" data-e="${esc(a)}">${cn(a) ? `<span class="rn"><b>${esc(cn(a))}</b><small>${esc(a)}</small></span>` : `<span class="rn">${esc(a)}</span>`}<button type="button" class="rx" data-rx="${esc(a)}" aria-label="Usuń adresata">${ic('x', 'i14')}</button></span>`;
   const draw = () => { $('.rchips', box).innerHTML = chips.map(chipHtml).join(''); };
-  const add = (a) => { a = a.trim().toLowerCase(); if (a && !chips.includes(a)) { chips.push(a); draw(); } };
+  const ping = () => box.dispatchEvent(new Event('input', { bubbles: true }));
+  const add = (a) => { a = a.trim().toLowerCase(); if (a && !chips.includes(a)) { chips.push(a); draw(); ping(); } };
   const hide = () => { sug.hidden = true; sug.innerHTML = ''; };
   const take = () => { const m = inp.value.match(EMAIL_RE); if (m) { m.forEach(add); inp.value = ''; } hide(); return !!m; };
   const cand = () => {
@@ -783,7 +861,7 @@ function mountRcpt(sh, id, initial) {
     sug.innerHTML = l.map((x) => `<button type="button" class="sg" data-e="${esc(x.email)}"><b>${esc(x.name || x.email)}</b><small>${x.name ? esc(x.email) : 'z korespondencji'}${x.name && !x.own ? ' · z korespondencji' : ''}</small></button>`).join(''); sug.hidden = false;
   };
   sug.addEventListener('pointerdown', (e) => { const b = e.target.closest('.sg'); if (!b) return; e.preventDefault(); add(b.dataset.e); inp.value = ''; hide(); inp.focus(); });
-  box.addEventListener('click', (e) => { const x = e.target.closest('[data-rx]'); if (x) { const i = chips.indexOf(x.dataset.rx); if (i >= 0) { chips.splice(i, 1); draw(); } inp.focus(); } else inp.focus(); });
+  box.addEventListener('click', (e) => { const x = e.target.closest('[data-rx]'); if (x) { const i = chips.indexOf(x.dataset.rx); if (i >= 0) { chips.splice(i, 1); draw(); ping(); } inp.focus(); } else inp.focus(); });
   inp.addEventListener('input', () => {
     const v = inp.value;
     if (/[,;]/.test(v)) { const parts = v.split(/[,;]/); const last = parts.pop(); parts.forEach((p) => (p.match(EMAIL_RE) || []).forEach(add)); inp.value = last.trimStart(); }
@@ -792,11 +870,11 @@ function mountRcpt(sh, id, initial) {
   });
   inp.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); const f = sug.querySelector('.sg'); if (!sug.hidden && f && !inp.value.includes('@')) { add(f.dataset.e); inp.value = ''; hide(); } else take(); }
-    else if (e.key === 'Backspace' && !inp.value && chips.length) { chips.pop(); draw(); }
+    else if (e.key === 'Backspace' && !inp.value && chips.length) { chips.pop(); draw(); ping(); }
   });
   inp.addEventListener('blur', () => setTimeout(() => { take(); }, 120));
   addrList(initial).forEach(add);
-  return { get: () => [...chips, ...(inp.value.trim() ? [inp.value.trim()] : [])].join(', '), focus: () => inp.focus() };
+  return { get: () => [...chips, ...(inp.value.trim() ? [inp.value.trim()] : [])].join(', '), set: (v) => { chips.length = 0; addrList(v).forEach(add); draw(); }, focus: () => inp.focus() };
 }
 // w treści oryginału: adresy e-mail i linki mailto: otwierają menu adresu
 function hookFrameMail(d) {
@@ -814,6 +892,64 @@ function hookFrameMail(d) {
     }
   } catch { /* iframe niedostępny */ }
 }
+
+// ---- szybkie odpowiedzi, wysyłka z cofnięciem i na później, lokalny zapis wersji roboczej ----
+const QUICK = ['Dziękuję!', 'Potwierdzam.', 'Oddzwonię.', 'Dam znać.', 'Mam pytanie:'];
+const autoAll = () => { try { return JSON.parse(localStorage.getItem('poczta.auto') || '{}'); } catch { return {}; } };
+const autoSave = (o) => { try { localStorage.setItem('poczta.auto', JSON.stringify(o)); } catch { /* brak miejsca */ } };
+const autoGet = (k) => autoAll()[k] || null;
+const autoSet = (k, v) => { const o = autoAll(); o[k] = v; const keys = Object.keys(o).sort((a, b) => o[b].t - o[a].t); for (const x of keys.slice(12)) delete o[x]; for (const x of keys) if (Date.now() - o[x].t > 7 * 864e5) delete o[x]; autoSave(o); };
+const autoDel = (k) => { const o = autoAll(); if (k in o) { delete o[k]; autoSave(o); } };
+const undoToast = (r, msg, ms) => toast(msg, { label: 'Cofnij', fn: async () => {
+  const c = await post(`/api/outbox/${r.id}/cancel`).catch(() => null);
+  if (!c) { toast('Już wysłane'); return; }
+  composeSheet({ mode: 'restore', p: c.payload });
+} }, ms);
+function laterOptions() {
+  const n = new Date(), at = (d, h) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x; }, day = (k) => { const x = new Date(n); x.setDate(x.getDate() + k); return x; };
+  const o = [];
+  if (n.getHours() < 17) o.push(['Dziś wieczorem · 18:00', at(n, 18)]); else if (n.getHours() < 21) o.push(['Za godzinę', new Date(n.getTime() + 3600e3)]);
+  o.push(['Jutro rano · 8:00', at(day(1), 8)], ['Jutro po południu · 13:00', at(day(1), 13)]);
+  const toMon = ((8 - n.getDay()) % 7) || 7; if (toMon > 1) o.push(['W poniedziałek · 8:00', at(day(toMon), 8)]);
+  return o;
+}
+function whenOverlay(onPick) {
+  if ($('#cwhen')) return;
+  const opts = laterOptions(), pad2 = (x) => String(x).padStart(2, '0'), nowL = new Date(Date.now() + 120000);
+  const minV = `${nowL.getFullYear()}-${pad2(nowL.getMonth() + 1)}-${pad2(nowL.getDate())}T${pad2(nowL.getHours())}:${pad2(nowL.getMinutes())}`;
+  $('#sheet-root').insertAdjacentHTML('beforeend', `<div id="cwhen" class="cguard"><div class="cg gl"><b>Wyślij później</b>${opts.map((o, i) => `<button type="button" class="org" data-w="${i}"><span><b>${o[0]}</b></span></button>`).join('')}
+    <div class="fld"><label for="cwdt">Własny termin</label><input class="in" id="cwdt" type="datetime-local" min="${minV}"></div><div class="err" id="cwerr"></div>
+    <div class="actions"><button class="btn pri grow" type="button" data-w="custom">Zaplanuj</button><button class="btn" type="button" data-w="x">Anuluj</button></div></div></div>`);
+  const box = $('#cwhen');
+  box.onclick = async (e) => {
+    if (e.target === box) { box.remove(); return; }
+    const w = e.target.closest('[data-w]')?.dataset.w; if (!w) return;
+    if (w === 'x') { box.remove(); return; }
+    let when;
+    if (w === 'custom') { when = new Date($('#cwdt').value); if (!$('#cwdt').value || isNaN(+when) || +when < Date.now() + 60000) { $('#cwerr').textContent = 'Wybierz termin w przyszłości'; return; } }
+    else when = opts[+w][1];
+    try { await onPick(+when, fmtDT(when)); } finally { box.remove(); }
+  };
+}
+async function outboxSheet() {
+  const r = await get('/api/outbox'), now = Date.now();
+  const row = (x) => `<div class="obx ${x.state === 'failed' ? 'bad' : ''}"><div class="ot"><b>${esc(x.subject || '(bez tematu)')}</b><span>Do: ${esc(toNames(x.to_addr))} · ${x.state === 'failed' ? `<i style="color:var(--er)">nie wysłano: ${esc(x.error || '')}</i>` : esc(fmtDT(x.send_at))}</span></div>
+    <div class="oa"><button class="btn" data-obx="edit" data-id="${x.id}">Edytuj</button><button class="btn warn" data-obx="del" data-id="${x.id}" aria-label="Anuluj wysyłkę">${ic('x', 'i18')}</button></div></div>`;
+  sheet(`<h2>Zaplanowane</h2>${r.items.length ? r.items.map(row).join('') : '<div class="empty" style="padding:24px 0">Brak zaplanowanych wiadomości.</div>'}`, (sh) => {
+    sh.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-obx]'); if (!b) return;
+      const c = await post(`/api/outbox/${b.dataset.id}/cancel`).catch(() => null); if (!c) { toast('Już wysłane'); closeSheet(); return; }
+      if (b.dataset.obx === 'edit') composeSheet({ mode: 'restore', p: c.payload }); else { closeSheet(); toast('Anulowano wysyłkę'); route(); }
+    });
+  });
+}
+function saveSearchSheet(query) {
+  sheet(`<h2>Zapisz wyszukiwanie</h2><form id="sf"><div class="fld"><label for="sn">Nazwa</label><input class="in" id="sn" maxlength="40" autocomplete="off" value="${esc(query.slice(0, 30))}"></div><p style="font-size:13px;color:var(--ink2);margin:8px 0 0;word-break:break-all">${esc(query)}</p><div class="err" id="err" role="alert"></div><div class="actions" style="margin-top:12px"><button class="btn pri grow" type="submit">Zapisz</button></div></form>`, (sh) => {
+    $('#sf', sh).onsubmit = async (ev) => { ev.preventDefault(); try { await post('/api/saved-searches', { name: $('#sn', sh).value, query }); closeSheet(); toast('Zapisano wyszukiwanie'); S.sq = query; route(); } catch (e) { $('#err', sh).textContent = e.message; } };
+  });
+}
+const fuCard = (f, i) => { const d = Math.max(3, Math.floor((Date.now() - f.date) / 864e5)); return `<div class="card gl" style="--i:${i}"><div class="k mono">${ic('clock', 'i14')}Bez odpowiedzi · ${d} dni</div><div class="ti">${esc(f.subject || '(bez tematu)')}</div><div class="wh">Do: ${esc(toNames(f.to_addr))}</div>
+  <div class="actions"><button class="btn pri grow" data-nudge="${f.id}">${ic('send', 'i18')}Przypomnij się</button><button class="btn" data-open="${f.id}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button><button class="btn" data-fuoff="${f.id}" aria-label="Nie przypominaj">${ic('x', 'i18')}</button></div></div>`; };
 
 // ---- nawigacja, zdarzenia ----
 function nav(cur) { document.querySelectorAll('.tab').forEach((t) => t.toggleAttribute('aria-current', false) || (t.dataset.tab === cur && t.setAttribute('aria-current', 'page'))); const bd = $('#bd-inbox'); bd.textContent = S.unread > 99 ? '99+' : S.unread; bd.hidden = !S.unread; }
@@ -834,11 +970,20 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
     else if (d.go) go(d.go);
+    else if (d.qr) composeSheet({ mode: 'reply', m: S.cur.m, quick: d.qr });
+    else if (d.nudge) { const r = await get(`/api/messages/${d.nudge}`); composeSheet({ mode: 'nudge', m: r.message }); }
+    else if (d.fuoff) { await post(`/api/messages/${d.fuoff}/followup-off`); toast('Nie będę przypominać'); route(); }
+    else if (d.ck !== undefined) { S.ck = d.ck; S.animate = false; route(); }
+    else if (d.unsub) {
+      el.disabled = true; el.textContent = 'Wypisuję…';
+      try { const r = await post(`/api/messages/${d.unsub}/unsubscribe`); if (r.how === 'link') { window.open(r.url, '_blank', 'noopener'); toast('Otwarto stronę wypisania. Potwierdź tam.'); el.disabled = false; el.textContent = 'Wypisz się'; } else { toast('Wypisano z newslettera'); el.closest('.fbanner')?.remove(); } }
+      catch (e) { toast(e.message || 'Nie udało się wypisać'); el.disabled = false; el.textContent = 'Wypisz się'; }
+    }
     else if (d.ea) emailSheet(d.ea, { name: d.ean || '', msg: /^#\/m\//.test(location.hash) ? S.cur?.m : null });
     else if (d.kc) contactSheet(S.contacts.find((c) => c.id === +d.kc));
     else if (d.kp) contactSheet(null, { email: d.kp, name: d.kpn });
@@ -856,6 +1001,7 @@ document.addEventListener('click', async (ev) => {
     else if (d.thr) go(`#/m/${d.thr}`);
     else if (d.fopen) await openProviderFolder(+d.facc, d.fopen);
     else if (d.act === 'folders') foldersSheet();
+    else if (d.act === 'outbox') await outboxSheet();
     else if (d.act === 'savesig') { const r = await post('/api/compose', { signature: $('#sigtxt').value }); S.sig = r.signature; toast('Podpis zapisany'); }
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
@@ -933,11 +1079,11 @@ document.addEventListener('change', async (ev) => {
     r.style.transition = ''; r.style.transform = ''; r.classList.remove('swl', 'swr', 'arm');
     if (lock !== 'x' || Math.abs(dx) < 90) return;
     S.swiped = Date.now();
-    const id = +r.dataset.open, wasUnread = r.classList.contains('unread'), action = dx < 0 ? 'delete' : rightAct();
+    const id = +r.dataset.open, th = +r.dataset.tn > 1, wasUnread = r.classList.contains('unread'), action = dx < 0 ? 'delete' : rightAct();
     (async () => {
       try {
-        if (action === 'restore') { await actMsgs([id], 'restore'); toast('Przywrócono'); }
-        else await orgDo([id], action);
+        if (action === 'restore') { await actMsgs([id], 'restore', undefined, th); toast('Przywrócono'); }
+        else await orgDo([id], action, undefined, { thread: th });
         if (wasUnread && !['spam', 'offers', 'trash'].includes(S.filter)) { S.unread = Math.max(0, S.unread - 1); badge(); }
         collapse(r); setTimeout(refreshCounts, 380);
       } catch (e) { toast(e.message || 'Błąd'); }

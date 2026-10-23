@@ -9,6 +9,7 @@ import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, dest
 import { openFolder, loadOlder, folderPath, syncFolders, providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
 import { moveTo, star, mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
 import { serverDeleteOn } from './jobs.js';
+import { assertPublicHost } from './security.js';
 import zlib from 'node:zlib';
 import { cleanHtml, frameDoc } from './intel/mailhtml.js';
 import { fetchImage } from './imgproxy.js';
@@ -53,7 +54,19 @@ function withItems(uid, rows) {
   for (const it of items) { if (!by.has(it.message_id)) by.set(it.message_id, []); by.get(it.message_id).push(it); }
   return rows.map((r) => { const its = by.get(r.id) || []; const open = its.filter((i) => i.status === 'new'); return { ...r, unread: !!r.unread, has_attach: !!r.has_attach, items: its, open_items: open.length, urgency: urgency(open[0]?.starts_at) }; });
 }
-const MSG_COLS = "m.id,m.account_id,m.to_addr,m.starred,(SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND m.thread_key!='' AND t.thread_key=m.thread_key AND t.cat IN ('inbox','sent','archive')) AS thread_n,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why";
+const MSG_COLS_T0 = "m.id,m.account_id,m.to_addr,m.starred,(SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND m.thread_key!='' AND t.thread_key=m.thread_key AND t.cat IN ('inbox','sent','archive')) AS thread_n,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why";
+
+// lista z rozmowami zwiniętymi: wiersz jest nieprzeczytany, gdy nieprzeczytana jest dowolna wiadomość rozmowy
+const MSG_COLS = MSG_COLS_T0;
+const MSG_COLS_T = MSG_COLS_T0.replace('m.unread,', "(m.unread OR EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.account_id=m.account_id AND m.thread_key!='' AND u.thread_key=m.thread_key AND u.cat=m.cat AND u.unread=1)) AS unread,");
+function expandThreads(uid, ids) {
+  const out = new Set(ids.map(Number).filter(Boolean));
+  for (const r of db.prepare(`SELECT id,account_id,thread_key,cat FROM messages WHERE user_id=? AND id IN (${[...out].map(() => '?').join(',') || 'NULL'})`).all(uid, ...out)) {
+    if (!r.thread_key) continue;
+    for (const x of db.prepare('SELECT id FROM messages WHERE user_id=? AND account_id=? AND thread_key=? AND cat=? LIMIT 100').all(uid, r.account_id, r.thread_key, r.cat)) out.add(x.id);
+  }
+  return [...out].slice(0, 1000);
+}
 
 function ftsQuery(q) {
   const toks = String(q).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
@@ -202,13 +215,14 @@ route('GET', '/api/messages', (ctx) => {
     if (tab === 'snoozed') { where.push('m.snoozed_until>?'); args.push(now); }
     else { where.push('(m.snoozed_until IS NULL OR m.snoozed_until<=?)'); args.push(now); }
   }
-  if (tab === 'unread') where.push('m.unread=1');
+  if (tab === 'unread') where.push('(m.unread=1 OR EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.account_id=m.account_id AND m.thread_key!=\'\' AND u.thread_key=m.thread_key AND u.cat=m.cat AND u.unread=1))');
+  if (!['action', 'dates', 'other', 'snoozed', 'starred'].includes(tab)) where.push(`(m.thread_key IS NULL OR m.thread_key='' OR NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND t.thread_key=m.thread_key AND t.cat=m.cat AND (t.date>m.date OR (t.date=m.date AND t.id>m.id))${tab === 'unread' ? ' AND t.unread=1' : ''}))`);
   if (tab === 'action') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status='new')");
   if (tab === 'dates') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status IN ('new','added'))");
-  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit);
+  const rows = db.prepare(`SELECT ${MSG_COLS_T} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit);
   const total = db.prepare("SELECT SUM(unread) u FROM messages WHERE user_id=? AND cat='inbox' AND (snoozed_until IS NULL OR snoozed_until<=?)").get(uid, now);
   const cn = counts(uid);
-  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed: cn.snoozed, counts: cn };
+  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed: cn.snoozed, counts: cn, outbox: db.prepare("SELECT COUNT(*) n FROM outbox WHERE user_id=? AND ((state='queued' AND send_at>?) OR state='failed')").get(uid, now + 15000).n };
 });
 const imagesOn = (uid) => (db.prepare("SELECT value FROM flags WHERE user_id=? AND key='images'").get(uid)?.value ?? '1') === '1';
 route('GET', '/api/messages/:id', async (ctx) => {
@@ -232,7 +246,7 @@ route('GET', '/api/messages/:id', async (ctx) => {
   const atts = db.prepare('SELECT idx,filename,ctype,size,cid,inline,data IS NOT NULL AS has_data FROM attachments WHERE message_id=? ORDER BY idx').all(m.id);
   const cids = new Map(atts.filter((x) => x.inline && x.cid && x.has_data).map((x) => [x.cid, x.idx]));
   const cleaned = rawHtml ? cleanHtml(rawHtml, { images, cid: (c) => (cids.has(c) ? `api/messages/${m.id}/att/${cids.get(c)}?view=1` : null) }) : null;
-  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why,
+  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why, unsub: m.unsub ? (JSON.parse(m.unsub).one ? 'one' : JSON.parse(m.unsub).mailto ? 'mail' : 'link') : null,
     attachments: atts.filter((x) => !x.inline).map((x) => ({ idx: x.idx, filename: x.filename, ctype: x.ctype, size: x.size })),
     cc_addr: m.cc_addr || '', refs: m.refs || '', message_id: m.message_id, starred: !!m.starred, folder: m.folder,
     thread,
@@ -273,12 +287,17 @@ route('GET', '/api/img', async (ctx) => {
   ctx.raw = { type: r.type, body: r.buf, headers: { 'Cache-Control': 'private, max-age=604800', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Disposition': 'inline' } };
 });
 route('POST', '/api/messages/:id/read', async (ctx) => {
-  const m = db.prepare('SELECT m.id,m.uid,m.account_id,m.folder FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
+  const m = db.prepare('SELECT m.id,m.uid,m.account_id,m.folder,m.unread,m.cat,m.thread_key FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
   const read = ctx.body.read !== false;
   db.prepare('UPDATE messages SET unread=? WHERE id=?').run(read ? 0 : 1, m.id);
   const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
-  if (acc && acc.provider !== 'demo') providers[acc.provider].setSeen({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid, read, folderPath(m.account_id, m.folder)).catch(() => {});
-  return { ok: true };
+  const seen = (r, v) => { if (acc && acc.provider !== 'demo') providers[acc.provider].setSeen({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), r.uid, v, folderPath(r.account_id, r.folder)).catch(() => {}); };
+  seen(m, read);
+  let count = read && m.unread ? 1 : 0;
+  if (read && m.thread_key) { // otwarcie rozmowy oznacza jako przeczytane wszystkie jej wiadomości z tej samej zakładki
+    for (const s of db.prepare('SELECT id,uid,account_id,folder FROM messages WHERE user_id=? AND account_id=? AND thread_key=? AND cat=? AND unread=1 AND id!=? LIMIT 30').all(ctx.user.id, m.account_id, m.thread_key, m.cat, m.id)) { db.prepare('UPDATE messages SET unread=0 WHERE id=?').run(s.id); seen(s, true); count++; }
+  }
+  return { ok: true, count };
 });
 route('POST', '/api/messages/:id/snooze', (ctx) => {
   const until = ctx.body.until === null ? null : Number(ctx.body.until);
@@ -289,8 +308,9 @@ route('POST', '/api/messages/:id/snooze', (ctx) => {
 });
 // porządkowanie: usuń / spam / oferty / zablokuj / przywróć (jedna trasa, także zbiorczo)
 route('POST', '/api/messages/act', (ctx) => {
-  const ids = Array.isArray(ctx.body.ids) ? ctx.body.ids : [];
+  let ids = Array.isArray(ctx.body.ids) ? ctx.body.ids : [];
   if (!ids.length || ids.length > 1000) bad('Nie wskazano wiadomości');
+  if (ctx.body.thread) ids = expandThreads(ctx.user.id, ids); // gest na zwiniętej rozmowie dotyczy całej rozmowy
   const action = String(ctx.body.action);
   if (action === 'star' || action === 'unstar') {
     const done = star(ctx.user.id, ids, action === 'star');
@@ -390,10 +410,38 @@ route('POST', '/api/organize', (ctx) => {
   const changed = ctx.body.reclassify ? reclassifyAll(ctx.user.id) : 0;
   return { ok: true, changed, serverDelete: serverDeleteOn(ctx.user.id), images: imagesOn(ctx.user.id) };
 });
+// operatory: od:/from:, do:/to:, ma:zalacznik (has:attachment), jest:nieprzeczytane (is:unread), jest:gwiazdka (is:starred), w:wyslane|archiwum|wszystko (in:)
+const plain = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l');
+function parseSearch(raw) {
+  const ops = { from: [], to: [], attach: false, unread: false, starred: false, scope: '' };
+  const text = String(raw).replace(/(?:^|\s)([\p{L}]+):(\S+)/gu, (all, k, v) => {
+    k = plain(k); v = v.replace(/^"|"$/g, '');
+    if (k === 'from' || k === 'od') ops.from.push(v.toLowerCase());
+    else if (k === 'to' || k === 'do') ops.to.push(v.toLowerCase());
+    else if ((k === 'has' || k === 'ma') && /^(attach|zalacz|plik|file)/.test(plain(v))) ops.attach = true;
+    else if ((k === 'is' || k === 'jest') && /^(unread|nieprzecz)/.test(plain(v))) ops.unread = true;
+    else if ((k === 'is' || k === 'jest') && /^(star|gwiazd|oznacz)/.test(plain(v))) ops.starred = true;
+    else if (k === 'in' || k === 'w') ops.scope = plain(v);
+    else return all;
+    return ' ';
+  });
+  return { text, ops };
+}
 route('GET', '/api/search', (ctx) => {
-  const fq = ftsQuery(ctx.query.get('q') || '');
-  if (!fq) return { messages: [] };
-  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages_fts f JOIN messages m ON m.id=f.rowid WHERE messages_fts MATCH ? AND m.user_id=? AND m.cat IN ('inbox','offers') ORDER BY m.date DESC LIMIT 40`).all(fq, ctx.user.id);
+  const { text, ops } = parseSearch(ctx.query.get('q') || ''), fq = ftsQuery(text);
+  const hasOps = ops.from.length || ops.to.length || ops.attach || ops.unread || ops.starred || ops.scope;
+  if (!fq && !hasOps) return { messages: [] };
+  const cats = { sent: "('sent')", wyslane: "('sent')", inbox: "('inbox')", skrzynka: "('inbox')", archive: "('archive')", archiwum: "('archive')", all: "('inbox','offers','archive','sent','spam','trash')", wszystko: "('inbox','offers','archive','sent','spam','trash')" }[ops.scope] || "('inbox','offers','archive','sent')";
+  const where = ['m.user_id=?', `m.cat IN ${cats}`], args = [ctx.user.id];
+  const like = (v) => `%${v.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  for (const v of ops.from) { where.push("(lower(m.from_addr) LIKE ? ESCAPE '\\' OR lower(m.from_name) LIKE ? ESCAPE '\\')"); args.push(like(v), like(v)); }
+  for (const v of ops.to) { where.push("lower(m.to_addr) LIKE ? ESCAPE '\\'"); args.push(like(v)); }
+  if (ops.attach) where.push('m.has_attach=1');
+  if (ops.unread) where.push('m.unread=1');
+  if (ops.starred) where.push('m.starred=1');
+  const rows = fq
+    ? db.prepare(`SELECT ${MSG_COLS} FROM messages_fts f JOIN messages m ON m.id=f.rowid WHERE messages_fts MATCH ? AND ${where.join(' AND ')} ORDER BY m.date DESC LIMIT 40`).all(fq, ...args)
+    : db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY m.date DESC LIMIT 40`).all(...args);
   return { messages: withItems(ctx.user.id, rows) };
 });
 // treść załącznika: zapisana lokalnie (małe obrazki inline) albo pobrana z serwera poczty
@@ -433,19 +481,109 @@ async function composeMessage(ctx) {
   }
   return { acc, msg };
 }
-route('POST', '/api/send', async (ctx) => {
-  if (!rateLimit(`send:${ctx.user.id}`, 30, 3600e3)) bad('Limit wysyłki: 30 wiadomości na godzinę', 429);
-  const { acc, msg } = await composeMessage(ctx);
+// właściwa wysyłka (natychmiast albo z kolejki)
+async function deliver(userId, body) {
+  const { acc, msg } = await composeMessage({ user: { id: userId }, body });
   if (!msg.to && !msg.cc && !msg.bcc) bad('Podaj adresata');
   if (!msg.text.trim() && !msg.attachments.length) bad('Wiadomość jest pusta');
   const cfg = JSON.parse(acc.config);
   if (acc.provider !== 'demo' && !cfg.smtp) bad('To konto nie ma skonfigurowanego serwera wysyłki (SMTP)');
   await providers[acc.provider].send({ ...cfg, email: acc.email }, accountSecret(acc), msg);
-  audit(ctx.user.id, 'sent', `${acc.email} -> ${[msg.to, msg.cc, msg.bcc].filter(Boolean).join(',').split(',').length}`);
-  if (ctx.body.draft_id) { const d = db.prepare("SELECT id FROM messages WHERE id=? AND user_id=? AND cat='drafts'").get(+ctx.body.draft_id, ctx.user.id); if (d) moveTo(ctx.user.id, [d.id], 'trash'); }
+  audit(userId, 'sent', `${acc.email} -> ${[msg.to, msg.cc, msg.bcc].filter(Boolean).join(',').split(',').length}`);
+  if (body.draft_id) { const d = db.prepare("SELECT id FROM messages WHERE id=? AND user_id=? AND cat='drafts'").get(+body.draft_id, userId); if (d) moveTo(userId, [d.id], 'trash'); }
   if (acc.provider === 'imap') setTimeout(() => syncFolders(acc.id, { force: true }).catch(() => {}), 3000); // dostawca zapisuje wysłaną kopię w Wysłanych
-  return { ok: true };
+  return { acc, msg };
+}
+// bez delay_ms/at wysyłamy od razu; z nimi wiadomość trafia do kolejki (cofnięcie wysyłki i wysyłka na później)
+route('POST', '/api/send', async (ctx) => {
+  if (!rateLimit(`send:${ctx.user.id}`, 30, 3600e3)) bad('Limit wysyłki: 30 wiadomości na godzinę', 429);
+  const delay = Math.max(0, Math.min(+ctx.body.delay_ms || 0, 600e3)), at = +ctx.body.at || 0;
+  if (!delay && !at) { await deliver(ctx.user.id, ctx.body); return { ok: true }; }
+  const { acc, msg } = await composeMessage(ctx); // błędy (adresy, rozmiar, brak SMTP) pokazujemy od razu, nie dopiero przy wysyłce
+  if (!msg.to && !msg.cc && !msg.bcc) bad('Podaj adresata');
+  if (!msg.text.trim() && !msg.attachments.length) bad('Wiadomość jest pusta');
+  if (acc.provider !== 'demo' && !JSON.parse(acc.config).smtp) bad('To konto nie ma skonfigurowanego serwera wysyłki (SMTP)');
+  const sendAt = at ? Math.max(at, Date.now()) : Date.now() + delay;
+  if (sendAt > Date.now() + 366 * 864e5) bad('Wybierz termin w ciągu roku');
+  if (db.prepare("SELECT COUNT(*) n FROM outbox WHERE user_id=? AND state IN ('queued','failed')").get(ctx.user.id).n >= 50) bad('Za dużo zaplanowanych wiadomości');
+  const r = db.prepare('INSERT INTO outbox(user_id,send_at,payload,subject,to_addr,created_at) VALUES(?,?,?,?,?,?)').run(ctx.user.id, sendAt, JSON.stringify(ctx.body), msg.subject, msg.to || msg.cc || msg.bcc, Date.now());
+  return { ok: true, queued: true, id: Number(r.lastInsertRowid), send_at: sendAt };
 });
+let flushing = false;
+export async function flushOutbox(now = Date.now()) {
+  if (flushing) return 0; flushing = true; let n = 0;
+  try {
+    for (const r of db.prepare("SELECT id,user_id,payload,subject FROM outbox WHERE state='queued' AND send_at<=? ORDER BY send_at LIMIT 10").all(now)) {
+      if (!db.prepare("UPDATE outbox SET state='sending' WHERE id=? AND state='queued'").run(r.id).changes) continue;
+      try { await deliver(r.user_id, JSON.parse(r.payload)); db.prepare('DELETE FROM outbox WHERE id=?').run(r.id); n++; }
+      catch (e) {
+        db.prepare("UPDATE outbox SET state='failed', error=? WHERE id=?").run(String(e.message || e).slice(0, 300), r.id);
+        sendToUser(r.user_id, { title: 'Nie wysłano wiadomości', body: `${r.subject || '(bez tematu)'}: ${String(e.message || e).slice(0, 100)}`, url: './#/', tag: 'outbox-fail' }).catch(() => {});
+      }
+    }
+  } finally { flushing = false; }
+  return n;
+}
+route('GET', '/api/outbox', (ctx) => ({ items: db.prepare("SELECT id,send_at,subject,to_addr,state,error FROM outbox WHERE user_id=? AND state IN ('queued','sending','failed') ORDER BY send_at LIMIT 60").all(ctx.user.id) }));
+route('POST', '/api/outbox/:id/cancel', (ctx) => { // anulowanie zwraca treść, żeby można było ją dalej edytować
+  const r = db.prepare('SELECT id,state,payload FROM outbox WHERE id=? AND user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Ta wiadomość została już wysłana albo anulowana', 404);
+  if (r.state === 'sending') bad('Wiadomość jest właśnie wysyłana', 409);
+  db.prepare('DELETE FROM outbox WHERE id=?').run(r.id); return { ok: true, payload: JSON.parse(r.payload) };
+});
+// wypisanie się z newslettera: jedno kliknięcie (RFC 8058), wiadomość mailto albo otwarcie strony
+route('POST', '/api/messages/:id/unsubscribe', async (ctx) => {
+  const m = db.prepare('SELECT id,unsub,account_id FROM messages WHERE id=? AND user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
+  const u = m.unsub ? JSON.parse(m.unsub) : bad('Ta wiadomość nie ma opcji wypisania się', 404);
+  const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
+  if (acc.provider === 'demo') { audit(ctx.user.id, 'unsubscribed', 'demo'); return { ok: true, how: 'demo' }; }
+  if (u.one && u.http) {
+    try {
+      const url = new URL(u.http); await assertPublicHost(url.hostname);
+      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click', redirect: 'manual', signal: AbortSignal.timeout(10000) });
+      if (r.status < 400) { audit(ctx.user.id, 'unsubscribed', url.hostname); return { ok: true, how: 'one' }; }
+    } catch { /* spróbujemy innej metody */ }
+  }
+  if (u.mailto) {
+    const mt = new URL(u.mailto), to = decodeURIComponent(mt.pathname);
+    if (isEmail(to) && providers[acc.provider] && JSON.parse(acc.config).smtp) {
+      await providers[acc.provider].send({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), { from: acc.email, to, subject: mt.searchParams.get('subject') || 'unsubscribe', text: mt.searchParams.get('body') || 'unsubscribe', attachments: [] });
+      audit(ctx.user.id, 'unsubscribed', to.split('@')[1] || ''); return { ok: true, how: 'mail' };
+    }
+  }
+  if (u.http) return { ok: true, how: 'link', url: u.http };
+  bad('Nie udało się wypisać automatycznie', 502);
+});
+// wysłane wiadomości bez odpowiedzi (3-45 dni), bez maili do samego siebie i do adresów no-reply
+route('GET', '/api/followups', (ctx) => {
+  const uid = ctx.user.id, now = Date.now(), mine = new Set(db.prepare('SELECT lower(email) e FROM accounts WHERE user_id=?').all(uid).map((r) => r.e));
+  const rows = db.prepare(`SELECT m.id,m.account_id,m.to_addr,m.subject,m.date FROM messages m WHERE m.user_id=? AND m.cat='sent' AND m.follow_off=0 AND m.thread_key IS NOT NULL AND m.thread_key!='' AND m.date<? AND m.date>?
+    AND NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND t.thread_key=m.thread_key AND t.cat IN ('inbox','archive') AND t.date>m.date)
+    AND NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND t.thread_key=m.thread_key AND t.cat='sent' AND (t.date>m.date OR (t.date=m.date AND t.id>m.id)))
+    ORDER BY m.date DESC LIMIT 40`).all(uid, now - 3 * 864e5, now - 45 * 864e5);
+  const ok = (a) => !mine.has(a) && !/no-?reply|noreply|donotreply/i.test(a);
+  return { items: rows.filter((r) => (String(r.to_addr).toLowerCase().match(/[^\s,;<>]+@[^\s,;<>]+/g) || []).some(ok)).slice(0, 20) };
+});
+route('POST', '/api/messages/:id/followup-off', (ctx) => { db.prepare('UPDATE messages SET follow_off=1 WHERE id=? AND user_id=?').run(+ctx.params.id, ctx.user.id); return { ok: true }; });
+// lista wszystkich załączników z wyszukiwaniem po nazwie pliku, temacie i adresie
+route('GET', '/api/attachments', (ctx) => {
+  const q = String(ctx.query.get('q') || '').trim().toLowerCase().slice(0, 80), kind = ctx.query.get('kind') || '', before = +ctx.query.get('before') || 0;
+  const where = ["a.user_id=?", 'a.inline=0', "m.cat IN ('inbox','offers','sent','archive')"], args = [ctx.user.id];
+  if (q) { const l = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`; where.push("(lower(a.filename) LIKE ? ESCAPE '\\' OR lower(m.subject) LIKE ? ESCAPE '\\' OR lower(m.from_name) LIKE ? ESCAPE '\\' OR lower(m.from_addr) LIKE ? ESCAPE '\\' OR lower(m.to_addr) LIKE ? ESCAPE '\\')"); args.push(l, l, l, l, l); }
+  if (kind === 'pdf') where.push("lower(a.ctype) LIKE '%pdf'");
+  else if (kind === 'img') where.push("lower(a.ctype) LIKE 'image/%'");
+  else if (kind === 'doc') where.push("(lower(a.ctype) LIKE '%word%' OR lower(a.ctype) LIKE '%excel%' OR lower(a.ctype) LIKE '%spreadsheet%' OR lower(a.ctype) LIKE '%powerpoint%' OR lower(a.ctype) LIKE '%presentation%' OR lower(a.ctype) LIKE 'text/%' OR lower(a.ctype) LIKE '%opendocument%' OR lower(a.filename) LIKE '%.docx' OR lower(a.filename) LIKE '%.xlsx' OR lower(a.filename) LIKE '%.csv')");
+  if (before) { where.push('m.date<?'); args.push(before); }
+  return { items: db.prepare(`SELECT a.idx,a.filename,a.ctype,a.size,m.id AS mid,m.from_name,m.from_addr,m.to_addr,m.cat,m.date,m.subject FROM attachments a JOIN messages m ON m.id=a.message_id WHERE ${where.join(' AND ')} ORDER BY m.date DESC, a.idx LIMIT 60`).all(...args) };
+});
+route('GET', '/api/saved-searches', (ctx) => ({ items: db.prepare('SELECT id,name,query FROM saved_searches WHERE user_id=? ORDER BY id').all(ctx.user.id) }));
+route('POST', '/api/saved-searches', (ctx) => {
+  const query = String(ctx.body.query || '').trim().slice(0, 200), name = String(ctx.body.name || query).trim().slice(0, 40);
+  if (!query) bad('Wpisz, czego szukasz');
+  if (db.prepare('SELECT COUNT(*) n FROM saved_searches WHERE user_id=?').get(ctx.user.id).n >= 20) bad('Limit 20 zapisanych wyszukiwań');
+  if (db.prepare('SELECT id FROM saved_searches WHERE user_id=? AND query=?').get(ctx.user.id, query)) bad('To wyszukiwanie jest już zapisane', 409);
+  return { ok: true, id: Number(db.prepare('INSERT INTO saved_searches(user_id,name,query,created_at) VALUES(?,?,?,?)').run(ctx.user.id, name, query, Date.now()).lastInsertRowid) };
+});
+route('DELETE', '/api/saved-searches/:id', (ctx) => { db.prepare('DELETE FROM saved_searches WHERE id=? AND user_id=?').run(+ctx.params.id, ctx.user.id); return { ok: true }; });
 // zapis szkicu: u dostawcy (Szkice) albo lokalnie na koncie demo; poprzednia wersja szkicu trafia do kosza
 route('POST', '/api/drafts', async (ctx) => {
   if (!rateLimit(`draft:${ctx.user.id}`, 60, 3600e3)) bad('Za dużo zapisów szkiców', 429);
@@ -598,6 +736,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(config.port, config.host, () => console.log(`Poczta działa: http://${config.host}:${config.port}`));
   initialSort();
   startScheduler();
+  db.prepare("UPDATE outbox SET state='failed', error='Przerwano przez restart serwera. Sprawdź folder Wysłane.' WHERE state='sending'").run();
+  setInterval(() => flushOutbox().catch(() => {}), 3000).unref();
   const stop = () => { server.close(); db.close(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }

@@ -56,15 +56,15 @@ function withItems(uid, rows) {
   for (const it of items) { if (!by.has(it.message_id)) by.set(it.message_id, []); by.get(it.message_id).push(it); }
   return rows.map((r) => { const its = by.get(r.id) || []; const open = its.filter((i) => i.status === 'new'); return { ...r, unread: !!r.unread, has_attach: !!r.has_attach, items: its, open_items: open.length, urgency: urgency(open[0]?.starts_at) }; });
 }
-const MSG_COLS_T0 = "m.id,m.account_id,m.to_addr,m.starred,CASE WHEN m.cat IN ('offers','spam','trash') THEN (SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.cat=m.cat AND m.from_addr!='' AND t.from_addr=m.from_addr) ELSE (SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND m.thread_key!='' AND t.thread_key=m.thread_key AND t.cat IN ('inbox','sent','archive')) END AS thread_n,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why";
+const MSG_COLS_T0 = "m.id,m.account_id,m.to_addr,m.starred,CASE WHEN m.cat IN ('inbox','offers','spam','trash') AND m.from_addr!='' THEN (SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.cat=m.cat AND t.from_addr=m.from_addr AND (m.cat!='inbox' OR t.snoozed_until IS NULL OR t.snoozed_until<=CAST(strftime('%s','now') AS INTEGER)*1000)) ELSE (SELECT COUNT(*) FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND m.thread_key!='' AND t.thread_key=m.thread_key AND t.cat IN ('inbox','sent','archive')) END AS thread_n,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why";
 
 // lista z rozmowami zwiniętymi: wiersz jest nieprzeczytany, gdy nieprzeczytana jest dowolna wiadomość rozmowy
 const MSG_COLS = MSG_COLS_T0;
-const MSG_COLS_T = MSG_COLS_T0.replace('m.unread,', "(m.unread OR EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.account_id=m.account_id AND m.thread_key!='' AND u.thread_key=m.thread_key AND u.cat=m.cat AND u.unread=1) OR (m.cat IN ('offers','spam','trash') AND m.from_addr!='' AND EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.cat=m.cat AND u.from_addr=m.from_addr AND u.unread=1))) AS unread,");
+const MSG_COLS_T = MSG_COLS_T0.replace('m.unread,', "(m.unread OR EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.account_id=m.account_id AND m.thread_key!='' AND u.thread_key=m.thread_key AND u.cat=m.cat AND u.unread=1) OR (m.cat IN ('inbox','offers','spam','trash') AND m.from_addr!='' AND EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.cat=m.cat AND u.from_addr=m.from_addr AND u.unread=1))) AS unread,");
 function expandThreads(uid, ids) {
   const out = new Set(ids.map(Number).filter(Boolean));
   for (const r of db.prepare(`SELECT id,account_id,thread_key,cat,from_addr FROM messages WHERE user_id=? AND id IN (${[...out].map(() => '?').join(',') || 'NULL'})`).all(uid, ...out)) {
-    if (['offers', 'spam', 'trash'].includes(r.cat) && r.from_addr) { // Spam, Oferty, Kosz: stos to wszystko od jednego nadawcy
+    if (['inbox', 'offers', 'spam', 'trash'].includes(r.cat) && r.from_addr) { // Skrzynka, Spam, Oferty, Kosz: stos to wszystko od jednego nadawcy
       for (const x of db.prepare('SELECT id FROM messages WHERE user_id=? AND cat=? AND from_addr=? LIMIT 900').all(uid, r.cat, r.from_addr)) out.add(x.id);
       continue;
     }
@@ -222,8 +222,8 @@ route('GET', '/api/messages', (ctx) => {
     if (tab === 'snoozed') { where.push('m.snoozed_until>?'); args.push(now); }
     else { where.push('(m.snoozed_until IS NULL OR m.snoozed_until<=?)'); args.push(now); }
   }
-  if (tab === 'unread') where.push('(m.unread=1 OR EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.account_id=m.account_id AND m.thread_key!=\'\' AND u.thread_key=m.thread_key AND u.cat=m.cat AND u.unread=1))');
-  if (['offers', 'spam', 'trash'].includes(tab)) where.push("(m.from_addr='' OR NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.cat=m.cat AND t.from_addr=m.from_addr AND (t.date>m.date OR (t.date=m.date AND t.id>m.id))))");
+  if (tab === 'unread') where.push("(m.unread=1 OR (m.from_addr!='' AND EXISTS(SELECT 1 FROM messages u WHERE u.user_id=m.user_id AND u.cat=m.cat AND u.from_addr=m.from_addr AND u.unread=1)))");
+  if (['offers', 'spam', 'trash', 'all', 'unread'].includes(tab)) where.push(`(m.from_addr='' OR NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.cat=m.cat AND t.from_addr=m.from_addr AND (t.date>m.date OR (t.date=m.date AND t.id>m.id))${tab === 'unread' ? ' AND t.unread=1' : ''}${tab === 'all' || tab === 'unread' ? ' AND (t.snoozed_until IS NULL OR t.snoozed_until<=' + now + ')' : ''}))`);
   else if (!['action', 'dates', 'other', 'snoozed', 'starred'].includes(tab)) where.push(`(m.thread_key IS NULL OR m.thread_key='' OR NOT EXISTS (SELECT 1 FROM messages t WHERE t.user_id=m.user_id AND t.account_id=m.account_id AND t.thread_key=m.thread_key AND t.cat=m.cat AND (t.date>m.date OR (t.date=m.date AND t.id>m.id))${tab === 'unread' ? ' AND t.unread=1' : ''}))`);
   if (tab === 'action') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status='new')");
   if (tab === 'dates') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status IN ('new','added'))");
@@ -238,7 +238,7 @@ route('GET', '/api/messages/:id/stack', (ctx) => {
   const uid = ctx.user.id, a = db.prepare('SELECT id,account_id,thread_key,cat,from_addr FROM messages WHERE id=? AND user_id=?').get(+ctx.params.id, uid) || bad('Nie ma takiej wiadomości', 404);
   const limit = Math.min(+ctx.query.get('limit') || 10, 50), before = +ctx.query.get('before') || 0;
   let where, args;
-  if (['offers', 'spam', 'trash'].includes(a.cat) && a.from_addr) { where = 'm.user_id=? AND m.cat=? AND m.from_addr=?'; args = [uid, a.cat, a.from_addr]; }
+  if (['inbox', 'offers', 'spam', 'trash'].includes(a.cat) && a.from_addr) { where = 'm.user_id=? AND m.cat=? AND m.from_addr=?'; args = [uid, a.cat, a.from_addr]; }
   else if (a.thread_key) { where = "m.user_id=? AND m.account_id=? AND m.thread_key=? AND m.cat IN ('inbox','sent','archive')"; args = [uid, a.account_id, a.thread_key]; }
   else { where = 'm.id=? AND m.user_id=?'; args = [a.id, uid]; }
   if (before) { where += ' AND m.date<?'; args.push(before); }

@@ -492,16 +492,17 @@ test('rozmowy: nagłówki i ta sama druga strona łączą, różne osoby i powia
   assert.notEqual(threadKeyFor({ user_id: acc.user_id, account_id: acc.id, cat: 'inbox', from_addr: 'bob@example.org', to_addr: '', date: T + 60 * 864e5, id: 0 }, { subject: 'Sprawa wspólna' }), row(9102).k);
   // lista: rozmowa Boba to jeden wiersz (najnowsza wiadomość), z licznikiem i nieprzeczytaniem
   const list = (await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => /Sprawa/.test(x.subject));
-  const bob = list.filter((x) => x.from_addr.startsWith('bob')); assert.equal(bob.length, 1); assert.equal(bob[0].id, row(9105).id); assert.equal(bob[0].thread_n, 3); assert.equal(bob[0].unread, true);
+  // skrzynka grupuje po nadawcy: dwie wiadomości z bob@ to jeden stos, adres prywatny to osobny wiersz
+  const bob = list.filter((x) => x.from_addr === 'bob@example.org'); assert.equal(bob.length, 1); assert.equal(bob[0].id, row(9104).id); assert.equal(bob[0].thread_n, 2); assert.equal(bob[0].unread, true);
   assert.equal(list.filter((x) => x.from_addr === 'cezary@example.org').length, 1);
   // otwarcie oznacza przeczytaną całą rozmowę, licznik w odpowiedzi
   const r = await api('POST', `/api/messages/${row(9105).id}/read`, {}); assert.equal(r.body.count, 3);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM messages WHERE uid IN (9102,9104,9105) AND unread=1").get().n, 0);
   // gest na zwiniętym wierszu usuwa całą rozmowę, cofnięcie ją przywraca
-  const del = await api('POST', '/api/messages/act', { ids: [row(9105).id], action: 'delete', thread: true }); assert.equal(del.body.count, 3);
-  assert.ok(!(await api('GET', '/api/messages?tab=all&limit=100')).body.messages.some((x) => x.from_addr.startsWith('bob')));
+  const del = await api('POST', '/api/messages/act', { ids: [row(9104).id], action: 'delete', thread: true }); assert.equal(del.body.count, 2);
+  assert.ok(!(await api('GET', '/api/messages?tab=all&limit=100')).body.messages.some((x) => x.from_addr === 'bob@example.org'));
   await api('POST', '/api/messages/act', { ids: del.body.ids, action: 'restore' });
-  assert.equal((await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => x.from_addr.startsWith('bob')).length, 1);
+  assert.equal((await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => x.from_addr === 'bob@example.org').length, 1);
 });
 
 test('kolejka wysyłki: cofnięcie, wysyłka później, błąd widoczny na liście, wypisanie się, brak odpowiedzi', async () => {

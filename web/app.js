@@ -986,7 +986,7 @@ function saveSearchSheet(query) {
 const fuCard = (f, i) => { const d = Math.max(3, Math.floor((Date.now() - f.date) / 864e5)); return `<div class="card gl" style="--i:${i}"><div class="k mono">${ic('clock', 'i14')}Bez odpowiedzi · ${d} dni</div><div class="ti">${esc(f.subject || '(bez tematu)')}</div><div class="wh">Do: ${esc(toNames(f.to_addr))}</div>
   <div class="actions"><button class="btn pri grow" data-nudge="${f.id}">${ic('send', 'i18')}Przypomnij się</button><button class="btn" data-open="${f.id}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button><button class="btn" data-fuoff="${f.id}" aria-label="Nie przypominaj">${ic('x', 'i18')}</button></div></div>`; };
 
-// ---- stosy: rozmowy w skrzynce i nadawcy w Spamie, Ofertach i Koszu ----
+// ---- stosy: nadawcy w skrzynce, Spamie, Ofertach i Koszu ----
 function stackRow(m, i) {
   const n = m.thread_n || 0; if (n < 2) return msgRow(m, i);
   const L = n >= 6 ? 4 : n >= 4 ? 3 : n - 1, own = m.cat === 'sent' || m.cat === 'drafts';

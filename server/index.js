@@ -338,10 +338,19 @@ route('PUT', '/api/contacts/:id', (ctx) => {
   const id = +ctx.params.id; db.prepare('SELECT id FROM contacts WHERE id=? AND user_id=?').get(id, ctx.user.id) || bad('Nie ma takiego kontaktu', 404);
   saveContact(ctx.user.id, id, ctx.body); return { ok: true, id };
 });
-route('DELETE', '/api/contacts/:id', (ctx) => { db.prepare('DELETE FROM contacts WHERE id=? AND user_id=?').run(+ctx.params.id, ctx.user.id); return { ok: true }; });
+route('DELETE', '/api/contacts/:id', (ctx) => {
+  const id = +ctx.params.id, uid = ctx.user.id;
+  tx(() => { // usunięty kontakt nie wraca do podpowiedzi z korespondencji
+    db.prepare('INSERT OR IGNORE INTO contact_hidden(user_id,email) SELECT user_id,email FROM contact_emails WHERE contact_id=? AND user_id=?').run(id, uid);
+    db.prepare('DELETE FROM contacts WHERE id=? AND user_id=?').run(id, uid);
+  });
+  return { ok: true };
+});
+route('POST', '/api/contacts/hide', (ctx) => { const e = normEmail(ctx.body.email); if (!isEmail(e)) bad('Niepoprawny adres'); db.prepare('INSERT OR IGNORE INTO contact_hidden(user_id,email) VALUES(?,?)').run(ctx.user.id, e); return { ok: true }; });
+route('POST', '/api/contacts/unhide', (ctx) => { db.prepare('DELETE FROM contact_hidden WHERE user_id=? AND email=?').run(ctx.user.id, normEmail(ctx.body.email)); return { ok: true }; });
 // osoby z korespondencji, których nie ma w kontaktach (podpowiedzi i "Dodaj")
 route('GET', '/api/contacts/people', (ctx) => {
-  const uid = ctx.user.id, mine = new Set(db.prepare('SELECT lower(email) e FROM accounts WHERE user_id=?').all(uid).map((r) => r.e)), known = new Set(db.prepare('SELECT email FROM contact_emails WHERE user_id=?').all(uid).map((r) => r.email));
+  const uid = ctx.user.id, mine = new Set(db.prepare('SELECT lower(email) e FROM accounts WHERE user_id=?').all(uid).map((r) => r.e)), known = new Set([...db.prepare('SELECT email FROM contact_emails WHERE user_id=?').all(uid), ...db.prepare('SELECT email FROM contact_hidden WHERE user_id=?').all(uid)].map((r) => r.email));
   const out = new Map();
   const bump = (a, n, when, w = 1) => { a = normEmail(a); if (!a || mine.has(a) || known.has(a) || !isEmail(a) || /no-?reply|noreply|donotreply|mailer-daemon/i.test(a)) return; const o = out.get(a) || { email: a, name: '', count: 0, last: 0 }; o.count += w; o.last = Math.max(o.last, when); if (n && !o.name) o.name = n; out.set(a, o); };
   for (const r of db.prepare("SELECT from_addr a, MAX(from_name) n, COUNT(*) c, MAX(date) d FROM messages WHERE user_id=? AND cat IN ('inbox','archive') AND from_addr!='' GROUP BY lower(from_addr) ORDER BY c DESC LIMIT 400").all(uid)) bump(r.a, r.n, r.d, r.c);

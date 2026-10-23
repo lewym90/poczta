@@ -93,6 +93,8 @@ const MIGRATIONS = [
      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, label TEXT,
      UNIQUE(user_id, email));
    CREATE INDEX cemail_contact ON contact_emails(contact_id);`,
+  `CREATE TABLE contact_hidden(
+     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, PRIMARY KEY(user_id, email));`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

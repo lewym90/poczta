@@ -734,10 +734,32 @@ async function viewContacts() {
   };
   draw();
   pplP.then((p) => { people = p; if ($('#klist')) draw(); });
+  S.khide = (r) => {
+    if (r.dataset.kp) { const e = r.dataset.kp, nm = r.dataset.kpn; people = (people || []).filter((p) => p.email !== e); S.people = null; post('/api/contacts/hide', { email: e }).catch(() => {}); toast('Ukryto z podpowiedzi', { label: 'Cofnij', fn: async () => { await post('/api/contacts/unhide', { email: e }); people = [...(people || []), { email: e, name: nm, count: 1, last: 0 }]; if ($('#klist')) draw(); } }); }
+    else { const c = S.contacts.find((x) => x.id === +r.dataset.kc); if (!c) return; S.contacts = S.contacts.filter((x) => x !== c); for (const e of c.emails) S.cmap.delete(e.email); S.people = null; api('DELETE', `/api/contacts/${c.id}`).catch(() => {}); toast('Usunięto kontakt', { label: 'Cofnij', fn: async () => { await post('/api/contacts', { name: c.name, note: c.note, emails: c.emails }); for (const e of c.emails) await post('/api/contacts/unhide', { email: e.email }); await loadContacts(true); if ($('#klist')) draw(); } }); }
+    draw();
+  };
   $('#kq').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
   S.kmore = () => { all = true; draw(); };
 }
 
+// gest: przeciągnięcie wiersza w lewo ukrywa podpowiedź albo usuwa kontakt
+(() => {
+  let row = null, sx = 0, sy = 0, dx = 0, lock = null;
+  const v = $('#view');
+  v.addEventListener('touchstart', (e) => { row = e.target.closest('.crow'); if (!row || e.touches.length > 1) { row = null; return; } const t = e.touches[0]; sx = t.clientX; sy = t.clientY; dx = 0; lock = null; row.dataset.rl = row.dataset.kp ? 'Ukryj' : 'Usuń'; }, { passive: true });
+  v.addEventListener('touchmove', (e) => {
+    if (!row) return; const t = e.touches[0], ax = t.clientX - sx, ay = t.clientY - sy;
+    if (!lock && (Math.abs(ax) > 10 || Math.abs(ay) > 10)) lock = Math.abs(ax) > Math.abs(ay) * 1.4 ? 'x' : 'y';
+    if (lock === 'y') { row = null; return; }
+    if (lock === 'x') { dx = Math.min(0, ax); row.style.transition = 'none'; row.style.transform = `translateX(${dx * 0.55}px)`; row.classList.toggle('swl', dx < -8); row.classList.toggle('arm', dx < -90); }
+  }, { passive: true });
+  const end = () => {
+    if (!row) return; const r = row; row = null; r.style.transition = ''; r.style.transform = ''; r.classList.remove('swl', 'arm');
+    if (lock !== 'x' || dx > -90) return; S.swiped = Date.now(); S.khide?.(r);
+  };
+  v.addEventListener('touchend', end); v.addEventListener('touchcancel', end);
+})();
 // pole adresatów: kafelki (nazwa + adres) i autouzupełnianie z kontaktów oraz z korespondencji
 function rcptHtml(id, label, hidden) {
   return `<div class="fld"><label for="${id}">${label}</label><div class="rf in" data-rf="${id}"><span class="rchips"></span><input id="${id}" class="ri" type="text" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="sug gl" hidden></div></div>`;

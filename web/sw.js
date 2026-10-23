@@ -1,5 +1,5 @@
 // Service worker: powłoka aplikacji offline. Dane z API zawsze z sieci (offline czyta aplikacja z własnej pamięci).
-const V = 'poczta-v15';
+const V = 'poczta-v16';
 const SHELL = ['./', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });

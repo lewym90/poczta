@@ -462,4 +462,12 @@ test('kontakty: dodawanie z wieloma adresami, duplikat adresu odrzucony, edycja,
   await api('DELETE', `/api/contacts/${mine.id}`); cookie = saved;
   assert.ok((await api('GET', '/api/contacts')).body.contacts.some((x) => x.id === mine.id));
   assert.equal((await api('DELETE', `/api/contacts/${mine.id}`)).status, 200); assert.ok(!(await api('GET', '/api/contacts')).body.contacts.some((x) => x.id === mine.id));
+  // usunięty kontakt i ręcznie ukryty adres nie wracają do podpowiedzi; cofnięcie je przywraca
+  let pp = (await api('GET', '/api/contacts/people')).body.people; assert.ok(!pp.some((p) => p.email === 'michal@example.com'), 'usunięty kontakt nie jest podpowiadany');
+  assert.ok(pp.some((p) => p.email === 'marta@example.com'));
+  assert.equal((await api('POST', '/api/contacts/hide', { email: 'Marta@Example.com' })).status, 200);
+  pp = (await api('GET', '/api/contacts/people')).body.people; assert.ok(!pp.some((p) => p.email === 'marta@example.com'));
+  await api('POST', '/api/contacts/unhide', { email: 'marta@example.com' });
+  assert.ok((await api('GET', '/api/contacts/people')).body.people.some((p) => p.email === 'marta@example.com'));
+  assert.equal((await api('POST', '/api/contacts/hide', { email: 'zle' })).status, 400);
 });

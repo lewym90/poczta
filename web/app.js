@@ -264,10 +264,30 @@ async function doSnooze(until) {
   if (/^#\/m\//.test(location.hash)) go('#/'); else route();
 }
 
+// Ramka z oryginalnym HTML: piaskownica bez skryptów, wysokość dopasowana do treści, szerokie maile zmniejszone do ekranu.
+function mountFrame(doc) {
+  const f = $('#mf'); if (!f) return;
+  let last = '', raf = 0;
+  const fit = () => {
+    const d = f.contentDocument; if (!d || !d.documentElement) return;
+    const de = d.documentElement, w = f.clientWidth || 360;
+    de.style.zoom = '';
+    const sw = Math.max(de.scrollWidth, d.body ? d.body.scrollWidth : 0);
+    if (sw > w + 2) de.style.zoom = (w / sw).toFixed(4);
+    const h = Math.ceil(Math.max(de.scrollHeight, d.body ? d.body.scrollHeight : 0, de.getBoundingClientRect().height)) + 2;
+    const key = `${w}x${h}x${de.style.zoom}`; if (key === last) return; last = key; f.style.height = h + 'px';
+  };
+  const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
+  f.onload = () => { fit(); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
+  f.srcdoc = doc;
+  window.addEventListener('resize', later, { passive: true });
+}
+
 async function viewMessage(id) {
-  const { message: m, items } = await get(`/api/messages/${id}`);
+  const { message: m, items } = await get(`/api/messages/${id}${S.forceImg === +id ? '?images=1' : ''}`);
   if (m.unread) post(`/api/messages/${id}/read`).then(() => { S.unread = Math.max(0, S.unread - 1); badge(); }).catch(() => {});
   const risky = m.risk >= 2;
+  const framed = !!m.frame, html = framed && (cacheGet('mode') || 'html') !== 'text';
   const d = new Date(m.date);
   const linkify = (t) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
   paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><span style="display:flex;gap:8px"><button class="round gl" data-org="${m.id}" aria-label="Porządkowanie: usuń, spam, zablokuj">${ic('more')}</button><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span></div>
@@ -276,8 +296,12 @@ async function viewMessage(id) {
     ${m.cat && m.cat !== 'inbox' && !risky ? `<div class="fbanner gl"><div><b>${FOLDER_NAME[m.cat] || 'Poza skrzynką'}</b>${m.cat_why ? ` · ${esc(m.cat_why)}` : ''}</div><button class="btn" data-orgact="inbox" data-orgid="${m.id}">To nie ${m.cat === 'spam' ? 'spam' : 'oferta'}</button></div>` : ''}
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
-    <div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`, { tabs: false });
+    ${framed ? `<div class="mseg gl" role="group" aria-label="Widok wiadomości"><button data-mode="html" aria-pressed="${html}">Oryginał</button><button data-mode="text" aria-pressed="${!html}">Tekst</button></div>` : ''}
+    ${html && m.images_blocked ? `<div class="fbanner gl"><div>Obrazki są wyłączone.</div><button class="btn" data-act="showimg" data-id="${m.id}">Pokaż obrazki</button></div>` : ''}
+    ${html ? `<div class="mailwrap ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div>`
+      : `<div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`}`, { tabs: false });
   S.cur = { m, items };
+  if (html) mountFrame(m.frame);
 }
 
 async function viewToday() {
@@ -338,10 +362,11 @@ async function renderOrgCard() {
   el.innerHTML = `<div class="k mono" style="color:var(--acc2)">${ic('tag', 'i14')}Poczta sortuje sama</div>
     <div class="wh" style="line-height:21px;margin-top:8px">Oferty i spam trafiają do osobnych zakładek bez powiadomień. Gdy oznaczysz nadawcę, pamiętam to na zawsze.</div>
     <div class="kv"><span>Oferty</span><span>${c.offers || 0}</span></div><div class="kv"><span>Spam</span><span>${c.spam || 0}</span></div><div class="kv"><span>Kosz (30 dni)</span><span>${c.trash || 0}</span></div>
+    <div class="kv" style="align-items:center"><span>Pokazuj obrazki w wiadomościach (pobiera je serwer, Twój telefon zostaje anonimowy)</span>${sw(r.images, 'imgtoggle', 'Obrazki w wiadomościach')}</div>
     <div class="kv" style="align-items:center"><span>Usuwaj też u dostawcy (do jego kosza)</span>${sw(r.serverDelete, 'srvdel', 'Usuwaj u dostawcy')}</div>
     <div class="actions"><button class="btn grow" data-act="resort">${ic('refresh', 'i18')}Posortuj ponownie</button></div>
     ${r.rules.length ? `<div class="sec" style="margin-top:14px">Zapamiętani nadawcy</div>${r.rules.map((x) => `<div class="rule"><span class="rb ${x.action}">${RULE_LABEL[x.action]}</span><span class="rv">${x.kind === 'domain' ? '@' : ''}${esc(x.value)}</span><button class="round gl" style="width:36px;height:36px" data-rmrule="${x.id}" aria-label="Usuń regułę">${ic('x', 'i14')}</button></div>`).join('')}` : ''}`;
-  S.srvdel = r.serverDelete;
+  S.srvdel = r.serverDelete; S.imgs = r.images;
 }
 
 // ---- powiadomienia push ----
@@ -444,7 +469,7 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -458,6 +483,9 @@ document.addEventListener('click', async (ev) => {
     else if (d.reply) composeSheet(S.cur);
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
+    else if (d.mode) { try { localStorage.setItem('poczta.mode', JSON.stringify(d.mode)); } catch {} route(); }
+    else if (d.act === 'showimg') { S.forceImg = +d.id; route(); }
+    else if (d.act === 'imgtoggle') { await post('/api/organize', { images: !S.imgs }); renderOrgCard(); }
     else if (d.rmrule) { await api('DELETE', `/api/rules/${d.rmrule}`); toast('Reguła usunięta'); renderOrgCard(); }
     else if (d.act === 'srvdel') { await post('/api/organize', { serverDelete: !S.srvdel }); renderOrgCard(); }
     else if (d.act === 'resort') { const r = await post('/api/organize', { reclassify: true }); toast(r.changed ? `Przeniesiono ${r.changed}` : 'Wszystko już na swoim miejscu'); renderOrgCard(); }

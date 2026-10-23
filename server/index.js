@@ -9,6 +9,9 @@ import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, dest
 import { providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
 import { mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
 import { serverDeleteOn } from './jobs.js';
+import zlib from 'node:zlib';
+import { cleanHtml, frameDoc } from './intel/mailhtml.js';
+import { fetchImage } from './imgproxy.js';
 import { vapidPublicKey, sendToUser, getPrefs, setPrefs } from './push.js';
 import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
@@ -163,10 +166,30 @@ route('GET', '/api/messages', (ctx) => {
   const cn = counts(uid);
   return { messages: withItems(uid, rows), unread: total.u || 0, snoozed: cn.snoozed, counts: cn };
 });
-route('GET', '/api/messages/:id', (ctx) => {
-  const m = db.prepare('SELECT m.*,a.email AS account_email,a.label AS account_label FROM messages m JOIN accounts a ON a.id=m.account_id WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
+const imagesOn = (uid) => (db.prepare("SELECT value FROM flags WHERE user_id=? AND key='images'").get(uid)?.value ?? '1') === '1';
+route('GET', '/api/messages/:id', async (ctx) => {
+  const m = db.prepare('SELECT m.*,a.email AS account_email,a.label AS account_label,a.provider AS account_provider FROM messages m JOIN accounts a ON a.id=m.account_id WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
   const items = db.prepare("SELECT * FROM found_items WHERE message_id=? AND user_id=? AND status!='dismissed' ORDER BY starts_at").all(m.id, ctx.user.id).map((i) => ({ ...i, link: calendarLink(i) }));
-  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why }, items };
+  // oryginalny HTML: zapisany przy pobraniu, a dla starszych wiadomości dociągany raz z serwera poczty
+  let rawHtml = m.html_z ? zlib.inflateSync(m.html_z).toString('utf8') : '';
+  if (!rawHtml && !m.html_try && m.account_provider === 'imap') {
+    db.prepare('UPDATE messages SET html_try=1 WHERE id=?').run(m.id);
+    const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
+    try {
+      rawHtml = await Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 15000))]);
+      if (rawHtml) db.prepare('UPDATE messages SET html_z=? WHERE id=?').run(zlib.deflateSync(Buffer.from(rawHtml)), m.id);
+    } catch { rawHtml = ''; }
+  }
+  const pref = imagesOn(ctx.user.id), images = pref || ctx.query.get('images') === '1';
+  const cleaned = rawHtml ? cleanHtml(rawHtml, { images }) : null;
+  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why,
+    frame: cleaned ? frameDoc(cleaned.html) : null, remote_images: cleaned ? cleaned.remote : 0, images_blocked: !!(cleaned && cleaned.remote && !images) }, items };
+});
+route('GET', '/api/img', async (ctx) => {
+  if (!rateLimit(`img:${ctx.user.id}`, 900, 300e3)) bad('Za dużo obrazków naraz', 429);
+  const u = ctx.query.get('u') || ''; if (!/^https?:\/\//i.test(u) || u.length > 2000) bad('Zły adres obrazka');
+  let r; try { r = await fetchImage(u); } catch (e) { bad('Nie udało się pobrać obrazka', 502); }
+  ctx.raw = { type: r.type, body: r.buf, headers: { 'Cache-Control': 'private, max-age=604800', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Disposition': 'inline' } };
 });
 route('POST', '/api/messages/:id/read', async (ctx) => {
   const m = db.prepare('SELECT m.id,m.uid,m.account_id FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
@@ -195,7 +218,7 @@ route('POST', '/api/folders/:cat/empty', (ctx) => {
   let ids; try { ids = emptyFolder(ctx.user.id, ctx.params.cat); } catch (e) { bad(e.message); }
   return { ok: true, count: ids.length, ids };
 });
-route('GET', '/api/rules', (ctx) => ({ rules: db.prepare('SELECT id,kind,value,action,created_at FROM rules WHERE user_id=? ORDER BY created_at DESC').all(ctx.user.id), serverDelete: serverDeleteOn(ctx.user.id), counts: counts(ctx.user.id) }));
+route('GET', '/api/rules', (ctx) => ({ rules: db.prepare('SELECT id,kind,value,action,created_at FROM rules WHERE user_id=? ORDER BY created_at DESC').all(ctx.user.id), serverDelete: serverDeleteOn(ctx.user.id), images: imagesOn(ctx.user.id), counts: counts(ctx.user.id) }));
 route('DELETE', '/api/rules/:id', (ctx) => {
   const r = db.prepare('SELECT * FROM rules WHERE id=? AND user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej reguły', 404);
   db.prepare('DELETE FROM rules WHERE id=?').run(r.id);
@@ -204,8 +227,9 @@ route('DELETE', '/api/rules/:id', (ctx) => {
 });
 route('POST', '/api/organize', (ctx) => {
   if (ctx.body.serverDelete !== undefined) db.prepare("INSERT INTO flags(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value").run(ctx.user.id, 'server_delete', ctx.body.serverDelete ? '1' : '0');
+  if (ctx.body.images !== undefined) db.prepare("INSERT INTO flags(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value").run(ctx.user.id, 'images', ctx.body.images ? '1' : '0');
   const changed = ctx.body.reclassify ? reclassifyAll(ctx.user.id) : 0;
-  return { ok: true, changed, serverDelete: serverDeleteOn(ctx.user.id) };
+  return { ok: true, changed, serverDelete: serverDeleteOn(ctx.user.id), images: imagesOn(ctx.user.id) };
 });
 route('GET', '/api/search', (ctx) => {
   const fq = ftsQuery(ctx.query.get('q') || '');

@@ -75,3 +75,19 @@ test('sprawy: reklamy i "darmowa dostawa" nie tworzą spraw', () => {
   assert.equal(extractItems({ subject: 'Paczka od Allegro Pay', body: 'Zamów do 5.11 z darmową dostawą, kod rabatowy -10%.', received: now }, now).length, 0);
   assert.equal(extractItems({ subject: 'Twoja paczka', body: 'Paczka zostanie dostarczona 28.10 w godz. 14-16 przez kuriera.', received: now }, now)[0]?.kind, 'parcel');
 });
+
+import { cleanHtml, frameDoc } from '../server/intel/mailhtml.js';
+import { isPrivateAddr } from '../server/imgproxy.js';
+test('HTML maila: zostaje układ i obrazki przez proxy, znikają skrypty, formularze i piksele śledzące', () => {
+  const h = '<html><head><style>.a{background:url(https://cdn.x/b.png)}</style><script>alert(1)</script></head><body bgcolor="#000"><table width="600" onclick="x()"><tr><td background="https://cdn.x/bg.jpg"><img src="https://cdn.x/p.jpg?a=1&b=2" width="300"><img src="https://t.example/track/open.gif" width="1" height="1"><a href="javascript:alert(1)">zły</a><a href="https://ok.example/x">dobry</a><form action="x"><input name="a"></form><iframe src="x"></iframe></td></tr></table></body></html>';
+  const r = cleanHtml(h);
+  assert.match(r.html, /<table width="600">/); assert.doesNotMatch(r.html, /onclick|<script|<iframe|<form|<input|javascript:|track\/open/);
+  assert.match(r.html, /src="api\/img\?u=https%3A%2F%2Fcdn\.x%2Fp\.jpg/); assert.match(r.html, /background-color:#000/);
+  assert.match(r.html, /<a href="https:\/\/ok\.example\/x" target="_blank" rel="noopener noreferrer nofollow">dobry/);
+  assert.doesNotMatch(cleanHtml(h, { images: false }).html, /api\/img/);
+  assert.match(frameDoc(r.html), /default-src 'none'; img-src 'self' data:/);
+});
+test('proxy obrazków: adresy prywatne odrzucone', () => {
+  for (const a of ['127.0.0.1', '10.1.2.3', '192.168.0.9', '172.20.1.1', '169.254.169.254', '::1', 'fd00::1', '::ffff:10.0.0.1', '100.64.0.1']) assert.equal(isPrivateAddr(a), true, a);
+  for (const a of ['8.8.8.8', '151.101.1.1', '2a00:1450:4001::1']) assert.equal(isPrivateAddr(a), false, a);
+});

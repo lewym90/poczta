@@ -9,6 +9,7 @@ import { assessRisk } from './intel/risk.js';
 import { notifyNewMessages } from './push.js';
 import { startJobs } from './jobs.js';
 import { classify } from './intel/classify.js';
+import zlib from 'node:zlib';
 import { loadRules } from './mailbox.js';
 
 export const providers = { imap, demo };
@@ -37,6 +38,7 @@ export function storeMessages(acc, messages) {
       added++;
       const id = Number(r.lastInsertRowid);
       db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked ? Date.now() : null, id);
+      if (m.html && !blocked && m.html.length < 3e6) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(m.html)), id);
       if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
       if (sorted.cat !== 'inbox') continue; // oferty i spam: bez powiadomień i bez wykrywania spraw

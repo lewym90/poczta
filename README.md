@@ -59,3 +59,9 @@ deploy/   install.sh
 - **Gesty**: w lewo usuwa (z „Cofnij"), w prawo oznacza jako spam (w Spamie i Ofertach: do skrzynki, w koszu: przywróć). Folder Oferty i Spam ma przycisk „Usuń wszystkie".
 - **Usuwanie u dostawcy**: po krótkiej karencji na „Cofnij" wiadomość trafia do kosza u dostawcy poczty (odwracalnie przez jego ok. 30 dni). Można to wyłączyć w Konta → Porządek w poczcie. Poczta nigdy nie usuwa wiadomości trwale u dostawcy.
 
+## Wiadomości HTML: tak, jak zostały nadane
+
+- Poczta zapisuje oryginalny HTML wiadomości (skompresowany) i wyświetla go w izolowanej ramce: bez skryptów, formularzy i osadzeń, z polityką CSP dopuszczającą tylko obrazki. Szerokie maile (np. 600 px) są zmniejszane do szerokości ekranu. Przełącznik „Oryginał / Tekst" zapamiętuje wybór.
+- Obrazki pobiera serwer, nie telefon (nadawca nie widzi Twojego adresu IP ani urządzenia). Proxy łączy się wyłącznie z internetem publicznym (ochrona przed SSRF i DNS rebinding), przyjmuje tylko obrazy rastrowe i ogranicza rozmiar. Piksele śledzące (1×1, znane wzorce adresów) w ogóle nie są pobierane, więc nadawca nie dowie się, że mail został otwarty. Wyłączysz obrazki w Konta → Porządek w poczcie, a w wątku jest „Pokaż obrazki".
+- Starsze wiadomości, pobrane zanim zapisywaliśmy HTML, są dociągane z serwera poczty przy pierwszym otwarciu.
+

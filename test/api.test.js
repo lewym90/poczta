@@ -39,7 +39,7 @@ test('konto demo: wiadomości, sprawy, urgency, sortowanie na foldery', async ()
   assert.equal((await api('POST', '/api/accounts/demo')).status, 200);
   const list = (await api('GET', '/api/messages')).body;
   assert.equal(list.messages.length, 5); // skrzynka bez ofert i spamu
-  assert.equal(list.counts.offers, 1); assert.equal(list.counts.spam, 2);
+  assert.equal(list.counts.offers, 2); assert.equal(list.counts.spam, 2);
   const parcel = list.messages.find((m) => m.subject.includes('paczka'));
   assert.equal(parcel.urgency, 'hi'); assert.equal(parcel.items[0].kind, 'parcel');
   const spam = (await api('GET', '/api/messages?tab=spam')).body.messages;
@@ -247,4 +247,25 @@ test('kosz u dostawcy po karencji, trwałe czyszczenie po 30 dniach', async () =
   assert.equal(db.prepare('SELECT server_done FROM messages WHERE id=?').get(off.id).server_done, 2); // poddaje się po 3 próbach
   assert.equal(purgeOld(Date.now() + 31 * 86400e3) >= 1, true);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM messages WHERE id=?').get(off.id).n, 0);
+});
+
+test('HTML wiadomości: ramka z oryginałem, obrazki przez proxy, ustawienie wyłączenia obrazków', async () => {
+  const { storeMessages } = await import('../server/sync.js');
+  const { db } = await import('../server/db.js');
+  const acc = db.prepare("SELECT * FROM accounts WHERE provider='demo'").get();
+  storeMessages(acc, [{ uid: 301, messageId: '<h301@x>', fromName: 'Netflix', fromAddr: 'info@netflix.example', toAddr: 't@t.pl', subject: 'Czeka tytuł', body: 'Czeka tytuł', snippet: 'x', date: Date.now(), unread: true, hasAttach: false, ics: [], bulk: true, unsub: true,
+    html: '<html><body><script>alert(1)</script><h1>Czeka</h1><a href="https://n.example/x">Przeglądaj wszystko</a><img src="https://cdn.example/p.jpg"></body></html>' }]);
+  const n = db.prepare("SELECT id FROM messages WHERE uid=301").get();
+  const d = (await api('GET', `/api/messages/${n.id}`)).body.message;
+  assert.ok(d.frame); assert.match(d.frame, /Content-Security-Policy/); assert.match(d.frame, /Przeglądaj wszystko/); assert.doesNotMatch(d.frame, /<script/);
+  const plain = (await api('GET', '/api/messages')).body.messages.find((x) => x.subject.includes('Pomysł'));
+  assert.equal((await api('GET', `/api/messages/${plain.id}`)).body.message.frame, null); // wiadomość tekstowa bez HTML
+  assert.equal((await api('POST', '/api/organize', { images: false })).body.images, false);
+  await api('POST', '/api/organize', { images: true });
+});
+test('proxy obrazków: wymaga logowania i nie łączy się z siecią prywatną', async () => {
+  const noAuth = await fetch(base + '/api/img?u=' + encodeURIComponent('https://example.com/a.png')); assert.equal(noAuth.status, 401);
+  assert.equal((await api('GET', '/api/img?u=' + encodeURIComponent('http://127.0.0.1:8792/zdrowie'))).status, 502);
+  assert.equal((await api('GET', '/api/img?u=' + encodeURIComponent('http://169.254.169.254/latest/meta-data'))).status, 502);
+  assert.equal((await api('GET', '/api/img?u=' + encodeURIComponent('ftp://example.com/a.png'))).status, 400);
 });

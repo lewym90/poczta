@@ -62,6 +62,8 @@ const MIGRATIONS = [
      id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      kind TEXT NOT NULL, value TEXT NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL,
      UNIQUE(user_id, kind, value));`,
+  `ALTER TABLE messages ADD COLUMN html_z BLOB;
+   ALTER TABLE messages ADD COLUMN html_try INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

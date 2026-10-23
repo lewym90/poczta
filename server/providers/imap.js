@@ -19,7 +19,7 @@ function htmlToText(html) {
 }
 
 async function normalize(msg) {
-  const p = await simpleParser(msg.source, { skipImageLinks: true });
+  const p = await simpleParser(msg.source);
   const ics = [];
   for (const a of p.attachments || []) if (/calendar/i.test(a.contentType) || /\.ics$/i.test(a.filename || '')) ics.push(a.content.toString('utf8'));
   const body = (p.text || htmlToText(p.html || '')).replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
@@ -30,6 +30,7 @@ async function normalize(msg) {
     subject: p.subject || '(bez tematu)', body, snippet: body.replace(/\s+/g, ' ').slice(0, 160),
     date: (p.date || msg.internalDate || new Date()).getTime(), unread: !msg.flags?.has('\\Seen'),
     hasAttach: (p.attachments || []).some((a) => !/calendar/i.test(a.contentType)), ics,
+    html: typeof p.html === 'string' ? p.html : '',
     unsub: !!p.headers?.get('list-unsubscribe'),
     bulk: /^(bulk|list|junk)$/i.test(String(p.headers?.get('precedence') || '')) || !!p.headers?.get('list-id') || !!p.headers?.get('x-campaign') || !!p.headers?.get('x-mailchimp-id') || !!p.headers?.get('feedback-id'),
   };
@@ -75,6 +76,20 @@ export const imap = {
     await c.connect();
     await c.mailboxOpen('INBOX'); // ImapFlow wchodzi w IDLE automatycznie, gdy nic innego się nie dzieje
     return () => c.logout().catch(() => {});
+  },
+  // Dociąga oryginalny HTML jednej wiadomości (dla starszych, pobranych zanim zaczęliśmy go zapisywać).
+  async fetchHtml(cfg, pass, uid) {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      const lock = await c.getMailboxLock('INBOX');
+      try {
+        const m = await c.fetchOne(String(uid), { uid: true, source: { maxLength: 6 * 1024 * 1024 } }, { uid: true });
+        if (!m?.source) return '';
+        const n = await normalize({ ...m, flags: new Set() });
+        return n.html || '';
+      } finally { lock.release(); }
+    } finally { await c.logout().catch(() => {}); }
   },
   // Przenosi wiadomości do kosza u dostawcy (odwracalne u niego przez ok. 30 dni). Zwraca liczbę przeniesionych.
   async trash(cfg, pass, uids) {

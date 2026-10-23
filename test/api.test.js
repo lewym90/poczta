@@ -35,14 +35,19 @@ test('instalacja: słabe hasło odrzucone, dobre tworzy sesję, druga rejestracj
   assert.equal(ok.status, 200); assert.ok(cookie.startsWith('sid='));
   assert.equal((await api('POST', '/api/setup', { email: 'x@y.pl', password: 'bardzo-dlugie-haslo-123' })).status, 403);
 });
-test('konto demo: wiadomości, sprawy, urgency, ochrona', async () => {
+test('konto demo: wiadomości, sprawy, urgency, sortowanie na foldery', async () => {
   assert.equal((await api('POST', '/api/accounts/demo')).status, 200);
   const list = (await api('GET', '/api/messages')).body;
-  assert.equal(list.messages.length, 6);
+  assert.equal(list.messages.length, 5); // skrzynka bez ofert i spamu
+  assert.equal(list.counts.offers, 1); assert.equal(list.counts.spam, 2);
   const parcel = list.messages.find((m) => m.subject.includes('paczka'));
   assert.equal(parcel.urgency, 'hi'); assert.equal(parcel.items[0].kind, 'parcel');
-  const phish = list.messages.find((m) => m.subject.startsWith('Pilne'));
+  const spam = (await api('GET', '/api/messages?tab=spam')).body.messages;
+  const phish = spam.find((m) => m.subject.startsWith('Pilne'));
   assert.equal(phish.risk, 2); assert.equal(phish.items.length, 0);
+  assert.ok(spam.some((m) => m.subject.includes('Pożyczka')));
+  const offer = (await api('GET', '/api/messages?tab=offers')).body.messages[0];
+  assert.equal(offer.items.length, 0); // data promocji to nie sprawa
   const inv = list.messages.find((m) => m.subject.includes('Faktura'));
   assert.equal(inv.items[0].kind, 'deadline'); assert.equal(inv.items[0].amount, 1240);
 });
@@ -175,4 +180,71 @@ test('przeglądy: godziny w ustawieniach, treść i jednorazowa wysyłka dzienni
   runDigests(at); assert.equal(runDigests(at), 0); // druga próba tego samego dnia nic nie wysyła
   db.prepare('DELETE FROM push_subs').run();
   await api('POST', '/api/push/prefs', { morning: '', evening: '' });
+});
+
+test('usuwanie: znika ze skrzynki, trafia do kosza, można cofnąć', async () => {
+  const msgs = (await api('GET', '/api/messages')).body.messages;
+  const m = msgs.find((x) => x.subject.includes('Pomysł'));
+  const r = await api('POST', '/api/messages/act', { ids: [m.id], action: 'delete' });
+  assert.equal(r.body.count, 1);
+  assert.equal((await api('GET', '/api/messages')).body.messages.some((x) => x.id === m.id), false);
+  assert.equal((await api('GET', '/api/messages?tab=trash')).body.messages[0].id, m.id);
+  assert.equal((await api('GET', '/api/search?q=weekend')).body.messages.length, 0); // kosz poza wyszukiwaniem
+  await api('POST', '/api/messages/act', { ids: [m.id], action: 'restore' });
+  assert.equal((await api('GET', '/api/messages')).body.messages.some((x) => x.id === m.id), true);
+});
+test('spam i blokada: reguła działa na przyszłe wiadomości, blokada znika wszędzie', async () => {
+  const { storeMessages } = await import('../server/sync.js');
+  const { db } = await import('../server/db.js');
+  const acc = db.prepare("SELECT * FROM accounts WHERE provider='demo'").get();
+  const mk = (uid, addr, subj) => ({ uid, messageId: `<t${uid}@x>`, fromName: 'Nadawca', fromAddr: addr, toAddr: 't@t.pl', subject: subj, body: 'Zwykła treść wiadomości.', snippet: 'x', date: Date.now(), unread: true, hasAttach: false, ics: [] });
+  storeMessages(acc, [mk(101, 'irytek@dokuczliwa.example', 'Pierwsza')]);
+  let list = (await api('GET', '/api/messages')).body.messages;
+  const first = list.find((x) => x.subject === 'Pierwsza'); assert.ok(first);
+  // oznaczam jako spam: to i przyszłe od tego nadawcy ma iść do spamu
+  assert.equal((await api('POST', '/api/messages/act', { ids: [first.id], action: 'spam' })).body.count, 1);
+  const r2 = storeMessages(acc, [mk(102, 'irytek@dokuczliwa.example', 'Druga')]);
+  assert.equal(r2.fresh.length, 0); // bez powiadomienia
+  assert.ok((await api('GET', '/api/messages?tab=spam')).body.messages.some((x) => x.subject === 'Druga'));
+  assert.equal((await api('GET', '/api/messages')).body.messages.some((x) => x.subject === 'Druga'), false);
+  // blokada: nigdzie więcej
+  await api('POST', '/api/messages/act', { ids: [first.id], action: 'block' });
+  storeMessages(acc, [mk(103, 'irytek@dokuczliwa.example', 'Trzecia')]);
+  for (const tab of ['all', 'spam', 'offers', 'trash', 'snoozed']) {
+    const l = (await api('GET', `/api/messages?tab=${tab}`)).body.messages;
+    assert.equal(l.some((x) => /Pierwsza|Druga|Trzecia/.test(x.subject)), false, tab);
+  }
+  assert.equal((await api('GET', '/api/search?q=Trzecia')).body.messages.length, 0);
+  const rules = (await api('GET', '/api/rules')).body.rules;
+  assert.equal(rules.find((x) => x.value === 'irytek@dokuczliwa.example').action, 'block');
+});
+test('blokada domeny publicznej odrzucona, zbiorcze opróżnianie folderu z cofnięciem', async () => {
+  const m = (await api('GET', '/api/messages?tab=spam')).body.messages[0];
+  const { db } = await import('../server/db.js');
+  db.prepare("UPDATE messages SET from_addr='ktos@gmail.com' WHERE id=?").run(m.id);
+  const ok = await api('POST', '/api/messages/act', { ids: [m.id], action: 'block', scope: 'domain' });
+  assert.equal(ok.status, 200); // dla freemaila blokujemy tylko nadawcę
+  assert.ok((await api('GET', '/api/rules')).body.rules.some((x) => x.kind === 'sender' && x.value === 'ktos@gmail.com'));
+  const before = (await api('GET', '/api/messages')).body.counts;
+  const e = await api('POST', '/api/folders/offers/empty'); assert.equal(e.body.count, before.offers);
+  assert.equal((await api('GET', '/api/messages')).body.counts.offers, 0);
+  await api('POST', '/api/messages/act', { ids: e.body.ids, action: 'restore' });
+  assert.equal((await api('GET', '/api/messages')).body.counts.offers, before.offers);
+  assert.equal((await api('POST', '/api/folders/inbox/empty')).status, 400);
+});
+test('kosz u dostawcy po karencji, trwałe czyszczenie po 30 dniach', async () => {
+  const { flushTrash, purgeOld } = await import('../server/jobs.js');
+  const { db } = await import('../server/db.js');
+  const off = (await api('GET', '/api/messages?tab=offers')).body.messages[0];
+  await api('POST', '/api/messages/act', { ids: [off.id], action: 'delete' });
+  const calls = []; const hook = async (acc, uids) => { calls.push([acc, uids]); };
+  assert.equal(await flushTrash(hook, Date.now()), 0); // karencja na "Cofnij"
+  assert.ok(await flushTrash(hook, Date.now() + 60e3) >= 1); assert.ok(calls.length >= 1);
+  assert.equal(db.prepare('SELECT server_done FROM messages WHERE id=?').get(off.id).server_done, 1);
+  const failing = async () => { throw new Error('brak kosza'); };
+  db.prepare("UPDATE messages SET server_done=0, server_try=0 WHERE id=?").run(off.id);
+  for (let i = 0; i < 4; i++) await flushTrash(failing, Date.now() + 60e3);
+  assert.equal(db.prepare('SELECT server_done FROM messages WHERE id=?').get(off.id).server_done, 2); // poddaje się po 3 próbach
+  assert.equal(purgeOld(Date.now() + 31 * 86400e3) >= 1, true);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM messages WHERE id=?').get(off.id).n, 0);
 });

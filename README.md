@@ -50,3 +50,12 @@ deploy/   install.sh
 - **Odkładanie**: przeciągnięcie wiadomości w lewo (lub zegar w wątku) odkłada ją na wieczór, jutro rano, weekend, za tydzień albo na własny termin. Wraca na górę jako nowa, z powiadomieniem. Przeciągnięcie w prawo oznacza ją jako przeczytaną.
 - **Płatności**: zakładka z sumą do zapłaty, podziałem na „po terminie / w tym tygodniu / później" i przyciskiem „Opłacone".
 - **Przeglądy**: poranne (sprawy na dziś, płatności tygodnia, nieprzeczytane) i wieczorne (plan na jutro) powiadomienie push. Wybierasz godzinę albo wyłączasz w Konta i prywatność. Gdy nic nie czeka, nie przychodzi. Strefa czasowa: `POCZTA_TZ` (domyślnie Europe/Warsaw).
+
+## Etap 3: porządek w poczcie
+
+- **Foldery**: Skrzynka (ważne), Oferty (reklamy, newslettery), Spam (oszustwa i śmieci), Odłożone, Kosz (30 dni). Oferty i Spam nie powiadamiają, nie liczą się do nieprzeczytanych i nie tworzą spraw ani płatności.
+- **Sortowanie**: lokalne heurystyki (nagłówki masowej wysyłki, język promocji, typowe treści spamu, ochrona przed oszustwem) z ochroną wiadomości ważnych (faktury, kody, przesyłki, wizyty). Po aktualizacji cała istniejąca poczta jest sortowana raz automatycznie, a w Konta → Porządek w poczcie można ją posortować ponownie.
+- **Reguły nadawców**: oznaczenie „To spam", „To oferta", „Zostaw w skrzynce" albo „Zablokuj" (nadawcę lub całą domenę, poza publiczną pocztą) zapamiętuje decyzję. Ręczne decyzje wygrywają z heurystyką, a blokada ukrywa wiadomości w każdej zakładce i wyszukiwarce.
+- **Gesty**: w lewo usuwa (z „Cofnij"), w prawo oznacza jako spam (w Spamie i Ofertach: do skrzynki, w koszu: przywróć). Folder Oferty i Spam ma przycisk „Usuń wszystkie".
+- **Usuwanie u dostawcy**: po krótkiej karencji na „Cofnij" wiadomość trafia do kosza u dostawcy poczty (odwracalnie przez jego ok. 30 dni). Można to wyłączyć w Konta → Porządek w poczcie. Poczta nigdy nie usuwa wiadomości trwale u dostawcy.
+

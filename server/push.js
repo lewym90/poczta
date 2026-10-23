@@ -17,7 +17,7 @@ const vapid = loadVapid();
 export const vapidPublicKey = () => vapid.publicKey;
 
 const contact = (userId) => `mailto:${db.prepare('SELECT email FROM users WHERE id=?').get(userId)?.email || 'admin@example.com'}`;
-const unread = (userId) => db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND (snoozed_until IS NULL OR snoozed_until<=?)').get(userId, Date.now()).n;
+const unread = (userId) => db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND cat=\'inbox\' AND (snoozed_until IS NULL OR snoozed_until<=?)').get(userId, Date.now()).n;
 
 export async function sendToUser(userId, payload) {
   if (process.env.POCZTA_PUSH === '0') return 0;

@@ -50,6 +50,18 @@ const MIGRATIONS = [
   `ALTER TABLE messages ADD COLUMN snoozed_until INTEGER;
    ALTER TABLE messages ADD COLUMN woke_at INTEGER;
    CREATE INDEX msg_snooze ON messages(user_id, snoozed_until);`,
+  `ALTER TABLE messages ADD COLUMN cat TEXT NOT NULL DEFAULT 'inbox';
+   ALTER TABLE messages ADD COLUMN cat_by TEXT NOT NULL DEFAULT 'auto';
+   ALTER TABLE messages ADD COLUMN cat_why TEXT;
+   ALTER TABLE messages ADD COLUMN trashed_from TEXT;
+   ALTER TABLE messages ADD COLUMN deleted_at INTEGER;
+   ALTER TABLE messages ADD COLUMN server_done INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE messages ADD COLUMN server_try INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX msg_cat ON messages(user_id, cat, date DESC);
+   CREATE TABLE rules(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     kind TEXT NOT NULL, value TEXT NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL,
+     UNIQUE(user_id, kind, value));`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

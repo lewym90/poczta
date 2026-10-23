@@ -23,8 +23,12 @@ export const demo = {
         body: 'Hej, świetny pomysł! Daj znać, czy w sobotę pasuje Ci wcześniej, bo muszę zaplanować dojazd. Pozdrawiam, Marta' },
       { uid: 6, fromName: 'Nowy Bank', fromAddr: 'security@nowy-bank-alert.xyz', subject: 'Pilne: potwierdź dane konta w ciągu 24 godzin', date: ago(40), unread: true,
         body: 'Twoje konto zostanie zablokowane. Kliknij tutaj i podaj dane logowania, aby uniknąć blokady: http://nowy-bank-alert.xyz/login' },
+      { uid: 7, fromName: 'Sklep Moda', fromAddr: 'news@sklep-moda.example', subject: '🔥 -30% na całą kolekcję, tylko do niedzieli!', date: ago(3), unread: true, bulk: true, unsub: true,
+        body: `Nie przegap! Kod rabatowy JESIEN30 daje -30% na nową kolekcję. Promocja trwa do ${dm(day(3))} 23:59, darmowa dostawa od 199 zł.\n\nZobacz więcej w sklepie.\n\nWypisz się z newslettera: http://sklep-moda.example/unsub` },
+      { uid: 8, fromName: 'Szybkie Pożyczki', fromAddr: 'kontakt@pozyczki-online.example', subject: 'Pożyczka bez BIK od ręki, gratulujemy wygranej!', date: ago(5), unread: true,
+        body: 'Gratulujemy wygranej! Pożyczka bez BIK czeka na Ciebie, zainwestuj i zarabiaj z domu dziennie. Kliknij tutaj.' },
     ].map((m) => ({ ...m, messageId: `<demo-${m.uid}@poczta.local>`, toAddr: 'ty@example.com', snippet: m.body.replace(/\s+/g, ' ').slice(0, 160), hasAttach: m.uid === 3, ics: [] }));
-    return { messages, lastUid: 6 };
+    return { messages, lastUid: 8 };
   },
   async setSeen() {},
   async send() { return { messageId: '<demo-sent>' }; },

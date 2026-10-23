@@ -1,12 +1,17 @@
 // Z wiadomości do „spraw": wydarzenie / termin płatności / przesyłka. Reguły → (później) AI na fragmentach.
 import { extractDates, norm, ymd } from './dates.js';
+import { PROMO_CTX } from './classify.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const RX = {
   deadline: /(do zaplaty|termin platnosci|zaplac do|platne do|termin zaplaty|nalezy zaplacic|do oplacenia|oplac do|wymagalne|ostateczny termin)/,
-  parcel: /(paczk|przesylk|kurier|doreczen|dostaw|inpost|dpd|dhl|odbior|nadano)/,
-  event: /(wizyt|spotkani|zaproszen|webinar|rozmow|konferencj|szkoleni|rezerwacj|badani|lekarz|przychodni|wydarzen|koncert|bilet|odlot|lot |wylot|termin|kolacj|lunch|obiad|urodzin|ślub|slub)/,
+  // przesyłka: słowo o paczce ORAZ czynność kuriera. Samo „dostawa" (np. „darmowa dostawa") nie wystarcza.
+  parcel: /((paczk|przesylk)\w*.{0,80}(dostarcz|dotrze|dotar|w drodze|nadan|doreczen|odbier|odbior|awizo|paczkomat|kurier|czeka na)|(dostarcz|doreczen|kurier|nadan|odbior)\w*.{0,80}(paczk|przesylk)|numer (przesylki|listu przewozowego)|sledz\w* przesylk)/,
+  // wydarzenie: mocne słowa wystarczą, słabe wymagają godziny
+  event: /(wizyt|spotkani|zaproszen|webinar|rozmow|konferencj|szkoleni|rezerwacj|badani|lekarz|przychodni|odlot|wylot|kolacj|urodzin|slub|ślub)/,
+  eventWeak: /(koncert|bilet|wydarzen|termin|lunch|obiad|lot )/,
   past: /(wyslan|otrzymal|z dnia|data wystawienia|zlozon|wystawion|utworzon|zrealizowan|opublikowan|data zamowienia)/,
+  promo: PROMO_CTX,
 };
 
 export function parseIcs(text) {
@@ -73,15 +78,17 @@ export function extractItems({ subject = '', body = '', fromName = '', ics = [],
     const ctx = nfull.slice(Math.max(0, d.index - 90), d.end + 90);
     const before = nfull.slice(Math.max(0, d.index - 40), d.index);
     if (RX.past.test(before)) continue;
+    if (RX.promo.test(ctx) || RX.promo.test(before)) continue; // data w reklamie to nie sprawa
     let kind = null;
     if (RX.deadline.test(ctx) || (/faktur|rachunek|oplata|platnosc/.test(nsubj) && /(do|termin)/.test(before))) kind = 'deadline';
     else if (RX.parcel.test(ctx) || RX.parcel.test(nsubj)) kind = 'parcel';
     else if (RX.event.test(ctx) || RX.event.test(nsubj)) kind = 'event';
+    else if (d.hasTime && (RX.eventWeak.test(ctx) || RX.eventWeak.test(nsubj))) kind = 'event';
     if (!kind) continue;
     const time = d.hasTime ? `${pad(d.sh)}:${pad(d.sm)}` : null;
     const starts = time ? `${d.ymd}T${time}` : d.ymd;
     const ends = d.hasTime && d.eh != null ? `${d.ymd}T${pad(d.eh)}:${pad(d.em)}` : null;
-    let conf = 0.55 + (RX[kind].test(ctx) ? 0.2 : 0) + (d.hasTime ? 0.1 : 0) + (RX[kind].test(nsubj) ? 0.1 : 0);
+    let conf = 0.55 + ((RX[kind] || RX.eventWeak).test(ctx) ? 0.2 : 0) + (d.hasTime ? 0.1 : 0) + ((RX[kind] || RX.eventWeak).test(nsubj) ? 0.1 : 0);
     const it = { kind, starts_at: starts, ends_at: ends, all_day: d.hasTime ? 0 : 1, confidence: Math.min(0.95, conf), source: 'rule', evidence: snippet(full, d.index, d.end) };
     if (kind === 'deadline') {
       const am = amountNear(full); if (am) Object.assign(it, am);

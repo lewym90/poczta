@@ -15,6 +15,7 @@ const P = {
   chev: '<path d="m9.500 5.500 6.500 6.500-6.500 6.500"/>', down: '<path d="m6 9.500 6 6 6-6"/>', back: '<path d="m14.500 5.500-6.500 6.500 6.500 6.500"/>',
   send: '<path d="M4 12 20 4l-4 16-4.500-6.500z"/>', plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="m6 6 12 12M18 6 6 18"/>', check: '<path d="m5 12.500 4.500 4.500L19 7.500"/>',
   shield: '<path class="f" d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 3.500 19 6v5.500c0 4.200-2.900 7-7 9-4.100-2-7-4.800-7-9V6z"/><path d="M12 8.500v4M12 15.600v.1"/>',
+  more: '<circle cx="6" cy="12" r="1.600"/><circle cx="12" cy="12" r="1.600"/><circle cx="18" cy="12" r="1.600"/>', ban: '<circle cx="12" cy="12" r="8.500"/><path d="m6 6 12 12"/>', tag: '<path d="M3.500 12.500V5.500a2 2 0 0 1 2-2h7l8 8-8.500 8.500zM8 8h.01"/>', inbox2: '<path d="M4 13.500 6.500 5h11L20 13.500V18a1.500 1.500 0 0 1-1.500 1.500h-13A1.500 1.500 0 0 1 4 18zM4 13.500h4.500l1 2h5l1-2H20"/>',
   clock: '<circle cx="12" cy="12" r="8.500"/><path d="M12 7.500V12l3 2"/>', wallet: '<path d="M4 8.500A2.500 2.500 0 0 1 6.500 6H18v3M4 8.500V17a2 2 0 0 0 2 2h12a1 1 0 0 0 1-1V9H6.500A2.500 2.500 0 0 1 4 8.500zM15.500 14h1.500"/>',
   bell: '<path d="M6 17.500V11a6 6 0 0 1 12 0v6.500l1.500 1.500h-15zM10 21h4"/>', bellOff: '<path d="M6 17.500V11a6 6 0 0 1 9-5.200M18 11v6.500l1.500 1.500h-15M10 21h4M4 4l16 16"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
@@ -82,7 +83,11 @@ const ago = (ts) => { if (!ts) return 'jeszcze nie synchronizowano'; const m = M
 
 // ---- UI pomocnicze ----
 let toastT;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2800); }
+function toast(msg, action, ms) {
+  const t = $('#toast'); t.textContent = msg; t.classList.toggle('act', !!action);
+  if (action) { const b = document.createElement('button'); b.type = 'button'; b.className = 'tact'; b.textContent = action.label; b.onclick = async () => { t.classList.remove('on'); try { await action.fn(); } catch (e) { toast(e.message || 'Błąd'); } }; t.appendChild(b); }
+  t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), ms || (action ? 9000 : 2800));
+}
 function sheet(html, onMount) {
   closeSheet(true);
   const root = $('#sheet-root');
@@ -113,7 +118,8 @@ const ringSvg = (cls) => `<svg width="52" height="52" viewBox="0 0 52 52" aria-h
 function msgRow(m, i) {
   const it = m.items.find((x) => x.status === 'new') || m.items[0];
   const snz = m.snoozed_until > Date.now() ? `<span class="cp snz">${ic('clock', 'i14')}Wraca ${esc(snzLabel(new Date(m.snoozed_until)))}</span>` : '';
-  const chip = snz || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
+  const why = !snz && m.cat && m.cat !== 'inbox' && m.cat_why && m.risk < 2 ? `<span class="cp snz">${ic('tag', 'i14')}${esc(m.cat_why)}</span>` : '';
+  const chip = snz || why || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
   return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div></div>
     <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${fmtTime(m.date)}</span></div>
@@ -137,7 +143,7 @@ async function viewInbox() {
     [msgs, today, pay] = await Promise.all([get('/api/messages?' + q), get('/api/today'), S.seg === 'pay' ? get('/api/obligations') : null]);
     cacheSet('inbox', { msgs, today }); S.offline = false;
   } catch (e) { if (e.status) throw e; const c = cacheGet('inbox'); if (!c) throw e; ({ msgs, today } = c); S.offline = true; }
-  S.unread = msgs.unread; badge(); await loadAccounts(true);
+  S.unread = msgs.unread; S.counts = msgs.counts || {}; badge(); await loadAccounts(true);
   const pend = today.items.filter((i) => i.status === 'new');
   const ev = pend.filter((i) => i.kind !== 'deadline').length, dl = pend.length - ev;
   const accLabel = S.account ? (S.accounts.find((a) => a.id === S.account)?.label || 'Konto') : 'Wszystkie konta';
@@ -146,17 +152,36 @@ async function viewInbox() {
   if (!S.accounts.length) body = emptyNoAccount();
   else if (S.seg === 'cases') body = casesHtml(pend);
   else if (S.seg === 'pay') body = pay ? payHtml(pay) : '<div class="empty">Płatności są dostępne online.</div>';
-  else body = `<div class="chips" role="group" aria-label="Filtr">${[['all', 'Wszystko'], ['unread', 'Nieprzeczytane'], ['action', 'Do działania'], ['dates', 'Terminy'], ['snoozed', 'Odłożone']].map(([k, l]) => `<button class="chip" data-filter="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}</div>
-    <div class="list">${msgs.messages.length ? msgs.messages.map(msgRow).join('') : `<div class="empty"><div class="big ser">Pusto</div>Brak wiadomości w tym widoku.</div>`}</div>`;
+  else body = `<div class="chips" role="group" aria-label="Foldery i filtry">${chipsHtml(msgs.counts)}</div>
+    ${bulkHtml(msgs)}<div class="list">${msgs.messages.length ? msgs.messages.map(msgRow).join('') : emptyFolderHtml()}</div>`;
   const found = pend.length && S.seg === 'msg' ? `<button class="found" data-seg="cases" style="--i:2" aria-label="Przejrzyj wykryte sprawy"><span class="spin"></span><span class="in"><span class="ico">${ic('spark', 'i18')}</span><span class="tx">Poczta znalazła ${ev ? `${ev} ${ev === 1 ? 'wydarzenie' : ev < 5 ? 'wydarzenia' : 'wydarzeń'}` : ''}${ev && dl ? ' i ' : ''}${dl ? `${dl} ${dl === 1 ? 'termin' : 'terminy'}` : ''}<small>Dodaj do Kalendarza jednym dotknięciem</small></span>${ic('chev', 'i14')}</span></button>` : '';
   paint(`${S.offline ? '<div class="off">Tryb offline · dane z pamięci</div>' : ''}
     <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></div>
     ${S.accounts.length ? heroHtml(today) : ''}
     ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
-    ${S.seg === 'msg' && S.filter === 'snoozed' ? '' : found}${body}`, { fab: !!S.accounts.length });
+    ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
   nav('inbox');
+  const ch = $('.chips .chip[aria-pressed=true]'); if (ch) ch.parentElement.scrollLeft = Math.max(0, ch.offsetLeft - 40);
 }
 
+const FOLDER_NAME = { offers: 'Oferty', spam: 'Spam', trash: 'Kosz' };
+function chipsHtml(c = {}) {
+  const k = (id, l, n, cls = '') => `<button class="chip ${cls}" data-filter="${id}" aria-pressed="${S.filter === id}">${l}${n ? `<b class="cn mono" id="cnt-${id}">${n}</b>` : ''}</button>`;
+  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.trash ? k('trash', 'Kosz', c.trash) : '');
+}
+function bulkHtml(m) {
+  const f = S.filter, n = (m.counts || {})[f];
+  if (!['offers', 'spam', 'trash'].includes(f) || !m.messages.length) return '';
+  const txt = { offers: 'Reklamy i newslettery. Nie powiadamiają i nie tworzą spraw.', spam: 'Wiadomości podejrzane i oznaczone przez Ciebie.', trash: 'Przechowywane 30 dni, potem znikają.' }[f];
+  return `<div class="bulk gl"><div><div class="bt mono">${FOLDER_NAME[f]} · ${n}</div><div class="bs">${txt}</div></div><button class="btn warn" data-act="empty" data-cat="${f}">${ic('trash', 'i18')}${f === 'trash' ? 'Opróżnij' : 'Usuń wszystkie'}</button></div>`;
+}
+function emptyFolderHtml() {
+  const f = S.filter;
+  if (f === 'offers') return `<div class="empty"><div class="big ser">Brak ofert</div>Reklamy i newslettery trafiają tu same.</div>`;
+  if (f === 'spam') return `<div class="empty"><div class="big ser">Czysto</div>Spam i podejrzane wiadomości trafiają tu same.</div>`;
+  if (f === 'trash') return `<div class="empty"><div class="big ser">Kosz jest pusty</div></div>`;
+  return `<div class="empty"><div class="big ser">Pusto</div>Brak wiadomości w tym widoku.</div>`;
+}
 function emptyNoAccount() {
   return `<div class="empty gl" style="border-radius:28px;margin-top:16px;padding:30px 20px"><div class="big ser">Dodaj pierwszą skrzynkę</div>Poczta działa z Gmailem, iCloud, Outlookiem, WP, Onetem, O2 i każdą skrzynką z IMAP.<div class="actions" style="justify-content:center"><button class="btn pri" data-go="#/accounts">${ic('plus', 'i18')}Dodaj konto</button></div></div>`;
 }
@@ -185,6 +210,34 @@ function payHtml(o) {
   return `<section class="hero gl pay" style="--i:0"><div style="display:flex;flex-direction:column;gap:6px"><span class="eyebrow mono">Do zapłaty</span><span class="t">${o.total ? fmt(o.total) : '0 zł'}</span><span class="s">${o.open.length} ${o.open.length === 1 ? 'płatność' : 'płatności'}${o.overdue ? ` · <b style="color:var(--er)">po terminie: ${o.overdue}${o.overdue_total ? ` (${fmt(o.overdue_total)})` : ''}</b>` : ''}${o.unknown ? ` · ${o.unknown} bez kwoty` : ''}</span></div></section>
   ${grp('Po terminie', late, true)}${grp('W tym tygodniu', soon)}${grp('Później', later)}
   ${o.paid.length ? `<div class="sec">Opłacone w tym miesiącu · ${fmt(o.paid_total)}</div>${o.paid.map((x) => `<div class="kv paid"><span>${esc(x.title)}</span><span>${x.amount ? esc(money(x)) : ''} <button class="link" data-unpaid="${x.id}">cofnij</button></span></div>`).join('')}` : ''}`;
+}
+
+async function actMsgs(ids, action, scope) { return post('/api/messages/act', { ids, action, scope }); }
+const freemail = /^(gmail\.com|wp\.pl|o2\.pl|onet\.pl|op\.pl|interia\.pl|poczta\.fm|icloud\.com|me\.com|outlook\.com|hotmail\.com|yahoo\.com|gmx\.(com|net)|proton\.me|protonmail\.com|live\.com|tlen\.pl)$/i;
+function orgSheet(m) {
+  const dom = String(m.from_addr || '').split('@')[1] || '';
+  const row = (act, ico, t, sub, scope = '') => `<button class="org" data-orgact="${act}" data-orgid="${m.id}" ${scope ? `data-scope="${scope}"` : ''}><span class="oi">${ic(ico, 'i18')}</span><span><b>${t}</b><small>${sub}</small></span></button>`;
+  sheet(`<div class="sheet-b"><h2 class="ser" style="font-size:28px;margin:6px 0 2px">Co zrobić z tym nadawcą?</h2><p style="color:var(--ink2);margin:0 0 8px;font-size:14px;word-break:break-all">${esc(m.from_name || '')} · ${esc(m.from_addr)}</p>
+    ${row('delete', 'trash', 'Usuń', 'Tylko ta wiadomość. Możesz cofnąć.')}
+    ${m.cat !== 'spam' ? row('spam', 'shield', 'To spam', 'Ta i każda kolejna od tego nadawcy trafi do Spamu.') : ''}
+    ${m.cat !== 'offers' ? row('offers', 'tag', 'To oferta lub newsletter', 'Kolejne wiadomości trafią do Ofert, bez powiadomień.') : ''}
+    ${m.cat !== 'inbox' ? row('inbox', 'inbox2', 'Zostaw w skrzynce', 'Ten nadawca będzie już zawsze w skrzynce.') : ''}
+    ${row('block', 'ban', 'Zablokuj nadawcę', 'Nigdy więcej nie pokaże się w żadnej zakładce.')}
+    ${dom && !freemail.test(dom) ? row('block', 'ban', `Zablokuj całą domenę @${esc(dom)}`, 'Wszystkie adresy tej firmy znikają na stałe.', 'domain') : ''}
+    <div class="actions"><button class="btn grow" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}">${ic('clock', 'i18')}Odłóż na później</button><button class="btn" data-act="close">Anuluj</button></div></div>`);
+}
+const ORG_MSG = { delete: 'Usunięto', spam: 'Przeniesiono do Spamu · nadawca już zawsze tam trafi', offers: 'Przeniesiono do Ofert', inbox: 'Wróciło do skrzynki', block: 'Nadawca zablokowany · nie pokaże się nigdzie' };
+async function orgDo(ids, action, scope, { after } = {}) {
+  const r = await actMsgs(ids, action, scope); closeSheet();
+  const undo = action === 'delete' || action === 'spam' || action === 'offers' || action === 'block' ? { label: 'Cofnij', fn: async () => { await restoreMsgs(r.ids, action); toast('Przywrócono'); route(); } } : null;
+  toast(`${ORG_MSG[action]}${r.count > 1 ? ` (${r.count})` : ''}`, undo);
+  return r;
+}
+// Cofnięcie: usunięte wracają z kosza, spam/oferty/blokada wracają do skrzynki razem z usunięciem reguły
+async function restoreMsgs(ids, action) {
+  if (action === 'delete') return actMsgs(ids, 'restore');
+  const r = await actMsgs(ids, 'inbox'); // reguła "zostaw w skrzynce" nadpisuje poprzednią
+  return r;
 }
 
 function snoozeOpts() {
@@ -217,9 +270,10 @@ async function viewMessage(id) {
   const risky = m.risk >= 2;
   const d = new Date(m.date);
   const linkify = (t) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
-  paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><span style="display:flex;gap:8px"><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span></div>
+  paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><span style="display:flex;gap:8px"><button class="round gl" data-org="${m.id}" aria-label="Porządkowanie: usuń, spam, zablokuj">${ic('more')}</button><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span></div>
     <h1 class="subject">${esc(m.subject)}</h1>
     <div class="meta"><div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div><div class="w"><div class="n">${esc(m.from_name || m.from_addr)}</div><div class="d mono">${esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div></div>
+    ${m.cat && m.cat !== 'inbox' && !risky ? `<div class="fbanner gl"><div><b>${FOLDER_NAME[m.cat] || 'Poza skrzynką'}</b>${m.cat_why ? ` · ${esc(m.cat_why)}` : ''}</div><button class="btn" data-orgact="inbox" data-orgid="${m.id}">To nie ${m.cat === 'spam' ? 'spam' : 'oferta'}</button></div>` : ''}
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
     <div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`, { tabs: false });
@@ -258,9 +312,10 @@ async function viewAccounts() {
     ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-bell="${a.id}" data-on="${a.notify ? 1 : 0}" aria-pressed="${a.notify}" aria-label="Powiadomienia z ${esc(a.label)}" style="${a.notify ? '' : 'opacity:.55'}">${ic(a.notify ? 'bell' : 'bellOff', 'i18')}</button><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
     <div class="actions" style="margin-top:14px"><button class="btn pri grow" data-act="addacc">${ic('plus', 'i18')}Dodaj skrzynkę</button>${S.demoAllowed && !S.accounts.some((a) => a.provider === 'demo') ? '<button class="btn" data-act="demo">Tryb demo</button>' : ''}</div>
     <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
+    <div class="sec">Porządek w poczcie</div><div id="orgcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
     <div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
-  nav('accounts'); renderPushCard();
+  nav('accounts'); renderPushCard(); renderOrgCard();
 }
 
 function viewAuth() {
@@ -272,6 +327,21 @@ function viewAuth() {
     try { const r = await post(setup ? '/api/setup' : '/api/login', { email: $('#e').value, password: $('#p').value, code: $('#c')?.value }); S.user = r.user; S.animate = true; go('#/'); }
     catch (e) { $('#err').textContent = e.message; b.disabled = false; }
   };
+}
+
+// ---- porządek: reguły nadawców, kosz, sortowanie ----
+const RULE_LABEL = { spam: 'spam', block: 'blokada', offers: 'oferty', inbox: 'skrzynka' };
+async function renderOrgCard() {
+  const el = $('#orgcard'); if (!el) return;
+  const r = await get('/api/rules').catch(() => null); if (!r || !$('#orgcard')) return;
+  const c = r.counts || {};
+  el.innerHTML = `<div class="k mono" style="color:var(--acc2)">${ic('tag', 'i14')}Poczta sortuje sama</div>
+    <div class="wh" style="line-height:21px;margin-top:8px">Oferty i spam trafiają do osobnych zakładek bez powiadomień. Gdy oznaczysz nadawcę, pamiętam to na zawsze.</div>
+    <div class="kv"><span>Oferty</span><span>${c.offers || 0}</span></div><div class="kv"><span>Spam</span><span>${c.spam || 0}</span></div><div class="kv"><span>Kosz (30 dni)</span><span>${c.trash || 0}</span></div>
+    <div class="kv" style="align-items:center"><span>Usuwaj też u dostawcy (do jego kosza)</span>${sw(r.serverDelete, 'srvdel', 'Usuwaj u dostawcy')}</div>
+    <div class="actions"><button class="btn grow" data-act="resort">${ic('refresh', 'i18')}Posortuj ponownie</button></div>
+    ${r.rules.length ? `<div class="sec" style="margin-top:14px">Zapamiętani nadawcy</div>${r.rules.map((x) => `<div class="rule"><span class="rb ${x.action}">${RULE_LABEL[x.action]}</span><span class="rv">${x.kind === 'domain' ? '@' : ''}${esc(x.value)}</span><button class="round gl" style="width:36px;height:36px" data-rmrule="${x.id}" aria-label="Usuń regułę">${ic('x', 'i14')}</button></div>`).join('')}` : ''}`;
+  S.srvdel = r.serverDelete;
 }
 
 // ---- powiadomienia push ----
@@ -374,7 +444,7 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -388,6 +458,16 @@ document.addEventListener('click', async (ev) => {
     else if (d.reply) composeSheet(S.cur);
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
+    else if (d.rmrule) { await api('DELETE', `/api/rules/${d.rmrule}`); toast('Reguła usunięta'); renderOrgCard(); }
+    else if (d.act === 'srvdel') { await post('/api/organize', { serverDelete: !S.srvdel }); renderOrgCard(); }
+    else if (d.act === 'resort') { const r = await post('/api/organize', { reclassify: true }); toast(r.changed ? `Przeniesiono ${r.changed}` : 'Wszystko już na swoim miejscu'); renderOrgCard(); }
+    else if (d.org) orgSheet(S.cur.m);
+    else if (d.orgact) { const goBack = /^#\/m\//.test(location.hash); await orgDo([+d.orgid], d.orgact, d.scope); if (goBack) go('#/'); else route(); }
+    else if (d.act === 'empty') {
+      const cat = d.cat, r = await post(`/api/folders/${cat}/empty`);
+      if (cat === 'trash') { toast('Kosz opróżniony'); route(); }
+      else { toast(`Usunięto ${r.count}`, { label: 'Cofnij', fn: async () => { await actMsgs(r.ids, 'restore'); toast('Przywrócono'); route(); } }); route(); }
+    }
     else if (d.snooze) snoozeSheet(d.snooze, +d.until || 0);
     else if (d.snz) await doSnooze(d.snz === 'now' ? null : +d.snz);
     else if (d.act === 'snzcustom') { const t = new Date($('#snzc').value).getTime(); if (!t) throw new Error('Wybierz datę i godzinę'); await doSnooze(t); }
@@ -419,33 +499,50 @@ document.addEventListener('change', async (ev) => {
     toast('Zapisano');
   } catch (e) { toast(e.message || 'Błąd'); }
 });
-// Gesty na liście: w lewo = odłóż, w prawo = przeczytane/nieprzeczytane.
+// Gesty na liście: w lewo = usuń, w prawo = spam (w Spamie i Ofertach: "do skrzynki", w koszu: "przywróć").
 (() => {
   let row = null, sx = 0, sy = 0, dx = 0, lock = null;
   const v = $('#view');
+  const rightAct = () => (S.filter === 'trash' ? 'restore' : ['spam', 'offers'].includes(S.filter) ? 'inbox' : 'spam');
   v.addEventListener('touchstart', (e) => {
     row = e.target.closest('.row[data-open]'); if (!row || e.touches.length > 1) { row = null; return; }
     v.classList.remove('enter'); const t = e.touches[0]; sx = t.clientX; sy = t.clientY; dx = 0; lock = null;
+    row.dataset.rl = S.filter === 'trash' ? '' : 'Usuń'; row.dataset.rr = { spam: 'Spam', inbox: 'Do skrzynki', restore: 'Przywróć' }[rightAct()];
   }, { passive: true });
   v.addEventListener('touchmove', (e) => {
     if (!row) return; const t = e.touches[0], ax = t.clientX - sx, ay = t.clientY - sy;
     if (!lock && (Math.abs(ax) > 10 || Math.abs(ay) > 10)) lock = Math.abs(ax) > Math.abs(ay) * 1.4 ? 'x' : 'y';
     if (lock === 'y') { row = null; return; }
-    if (lock === 'x') { dx = ax; row.style.transition = 'none'; row.style.transform = `translateX(${dx * 0.55}px)`; row.classList.toggle('swl', dx < -8); row.classList.toggle('swr', dx > 8); row.classList.toggle('arm', Math.abs(dx) > 90); }
+    if (lock === 'x') { dx = (!row.dataset.rl && ax < 0) ? 0 : ax; row.style.transition = 'none'; row.style.transform = `translateX(${dx * 0.55}px)`; row.classList.toggle('swl', dx < -8); row.classList.toggle('swr', dx > 8); row.classList.toggle('arm', Math.abs(dx) > 90); }
   }, { passive: true });
+  const collapse = (r) => {
+    r.style.height = r.offsetHeight + 'px'; r.style.overflow = 'hidden';
+    requestAnimationFrame(() => { r.style.transition = 'height .32s ease, opacity .25s, margin .32s, padding .32s'; r.style.height = '0'; r.style.opacity = '0'; r.style.marginTop = '-8px'; r.style.paddingTop = '0'; r.style.paddingBottom = '0'; setTimeout(() => r.remove(), 340); });
+  };
   const end = () => {
     if (!row) return; const r = row; row = null;
     r.style.transition = ''; r.style.transform = ''; r.classList.remove('swl', 'swr', 'arm');
-    if (lock !== 'x') return;
-    const id = r.dataset.open;
-    if (dx < -90) { S.swiped = Date.now(); snoozeSheet(id); }
-    else if (dx > 90) {
-      S.swiped = Date.now(); const wasUnread = r.classList.contains('unread');
-      post(`/api/messages/${id}/read`, { read: wasUnread }).then(() => { r.classList.toggle('unread', !wasUnread); S.unread = Math.max(0, S.unread + (wasUnread ? -1 : 1)); badge(); toast(wasUnread ? 'Przeczytane' : 'Oznaczono jako nieprzeczytane'); }).catch((e) => toast(e.message));
-    }
+    if (lock !== 'x' || Math.abs(dx) < 90) return;
+    S.swiped = Date.now();
+    const id = +r.dataset.open, wasUnread = r.classList.contains('unread'), action = dx < 0 ? 'delete' : rightAct();
+    (async () => {
+      try {
+        if (action === 'restore') { await actMsgs([id], 'restore'); toast('Przywrócono'); }
+        else await orgDo([id], action);
+        if (wasUnread && !['spam', 'offers', 'trash'].includes(S.filter)) { S.unread = Math.max(0, S.unread - 1); badge(); }
+        collapse(r); setTimeout(refreshCounts, 380);
+      } catch (e) { toast(e.message || 'Błąd'); }
+    })();
   };
   v.addEventListener('touchend', end); v.addEventListener('touchcancel', end);
 })();
+// Odświeża tylko liczniki przy folderach, bez przerysowania listy.
+async function refreshCounts() {
+  try { const m = await get('/api/messages?limit=1'); S.counts = m.counts; const c = m.counts || {};
+    const bt = $('.bulk .bt'); if (bt) { if (c[S.filter]) bt.textContent = `${FOLDER_NAME[S.filter]} · ${c[S.filter]}`; else $('.bulk').remove(); }
+    for (const k of ['offers', 'spam', 'snoozed', 'trash']) { const el = $('#cnt-' + k); if (el) { if (c[k]) el.textContent = c[k]; else el.remove(); } }
+  } catch { /* cicho */ }
+}
 $('#fab').onclick = () => composeSheet();
 // Samonaprawa: iOS bywa, że gubi subskrypcję, a serwer zna tylko starą. Przy starcie odnawiamy ją po cichu.
 async function pushHeal() {

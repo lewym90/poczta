@@ -30,6 +30,8 @@ async function normalize(msg) {
     subject: p.subject || '(bez tematu)', body, snippet: body.replace(/\s+/g, ' ').slice(0, 160),
     date: (p.date || msg.internalDate || new Date()).getTime(), unread: !msg.flags?.has('\\Seen'),
     hasAttach: (p.attachments || []).some((a) => !/calendar/i.test(a.contentType)), ics,
+    unsub: !!p.headers?.get('list-unsubscribe'),
+    bulk: /^(bulk|list|junk)$/i.test(String(p.headers?.get('precedence') || '')) || !!p.headers?.get('list-id') || !!p.headers?.get('x-campaign') || !!p.headers?.get('x-mailchimp-id') || !!p.headers?.get('feedback-id'),
   };
 }
 
@@ -73,6 +75,19 @@ export const imap = {
     await c.connect();
     await c.mailboxOpen('INBOX'); // ImapFlow wchodzi w IDLE automatycznie, gdy nic innego się nie dzieje
     return () => c.logout().catch(() => {});
+  },
+  // Przenosi wiadomości do kosza u dostawcy (odwracalne u niego przez ok. 30 dni). Zwraca liczbę przeniesionych.
+  async trash(cfg, pass, uids) {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      const boxes = await c.list();
+      const t = boxes.find((b) => b.specialUse === '\\Trash') || boxes.find((b) => /^(trash|kosz|deleted( items| messages)?|elementy usuni[ęe]te|\[gmail\]\/(trash|kosz))$/i.test(b.path) || /^(trash|kosz)$/i.test(b.name));
+      if (!t) throw new Error('Nie znaleziono kosza u dostawcy');
+      const lock = await c.getMailboxLock('INBOX');
+      try { await c.messageMove(uids.join(','), t.path, { uid: true }); } finally { lock.release(); }
+      return uids.length;
+    } finally { await c.logout().catch(() => {}); }
   },
   async setSeen(cfg, pass, uid, seen) {
     const c = client(cfg, pass);

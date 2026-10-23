@@ -7,6 +7,8 @@ import { config } from './config.js';
 import { db, audit } from './db.js';
 import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, destroySession, rateLimit } from './security.js';
 import { providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
+import { mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
+import { serverDeleteOn } from './jobs.js';
 import { vapidPublicKey, sendToUser, getPrefs, setPrefs } from './push.js';
 import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
@@ -47,7 +49,7 @@ function withItems(uid, rows) {
   for (const it of items) { if (!by.has(it.message_id)) by.set(it.message_id, []); by.get(it.message_id).push(it); }
   return rows.map((r) => { const its = by.get(r.id) || []; const open = its.filter((i) => i.status === 'new'); return { ...r, unread: !!r.unread, has_attach: !!r.has_attach, items: its, open_items: open.length, urgency: urgency(open[0]?.starts_at) }; });
 }
-const MSG_COLS = 'm.id,m.account_id,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at';
+const MSG_COLS = 'm.id,m.account_id,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why';
 
 function ftsQuery(q) {
   const toks = String(q).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
@@ -146,20 +148,25 @@ route('GET', '/api/messages', (ctx) => {
   if (acc) { where.push('m.account_id=?'); args.push(acc); }
   if (before) { where.push('m.date<?'); args.push(before); }
   const now = Date.now();
-  if (tab === 'snoozed') { where.push('m.snoozed_until>?'); args.push(now); }
-  else { where.push('(m.snoozed_until IS NULL OR m.snoozed_until<=?)'); args.push(now); }
+  const FOLDERS = { offers: 'offers', spam: 'spam', trash: 'trash' };
+  if (FOLDERS[tab]) where.push('m.cat=?'), args.push(FOLDERS[tab]);
+  else {
+    where.push("m.cat='inbox'");
+    if (tab === 'snoozed') { where.push('m.snoozed_until>?'); args.push(now); }
+    else { where.push('(m.snoozed_until IS NULL OR m.snoozed_until<=?)'); args.push(now); }
+  }
   if (tab === 'unread') where.push('m.unread=1');
   if (tab === 'action') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status='new')");
   if (tab === 'dates') where.push("EXISTS(SELECT 1 FROM found_items f WHERE f.message_id=m.id AND f.status IN ('new','added'))");
   const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages m WHERE ${where.join(' AND ')} ORDER BY MAX(m.date, COALESCE(m.woke_at,0)) DESC LIMIT ?`).all(...args, limit);
-  const total = db.prepare('SELECT SUM(unread) u FROM messages WHERE user_id=? AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid, now);
-  const snoozed = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND snoozed_until>?').get(uid, now).n;
-  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed };
+  const total = db.prepare("SELECT SUM(unread) u FROM messages WHERE user_id=? AND cat='inbox' AND (snoozed_until IS NULL OR snoozed_until<=?)").get(uid, now);
+  const cn = counts(uid);
+  return { messages: withItems(uid, rows), unread: total.u || 0, snoozed: cn.snoozed, counts: cn };
 });
 route('GET', '/api/messages/:id', (ctx) => {
   const m = db.prepare('SELECT m.*,a.email AS account_email,a.label AS account_label FROM messages m JOIN accounts a ON a.id=m.account_id WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
   const items = db.prepare("SELECT * FROM found_items WHERE message_id=? AND user_id=? AND status!='dismissed' ORDER BY starts_at").all(m.id, ctx.user.id).map((i) => ({ ...i, link: calendarLink(i) }));
-  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until }, items };
+  return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why }, items };
 });
 route('POST', '/api/messages/:id/read', async (ctx) => {
   const m = db.prepare('SELECT m.id,m.uid,m.account_id FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
@@ -176,10 +183,34 @@ route('POST', '/api/messages/:id/snooze', (ctx) => {
   if (!r.changes) bad('Nie ma takiej wiadomości', 404);
   audit(ctx.user.id, until ? 'snooze' : 'unsnooze', ctx.params.id); return { ok: true, until };
 });
+// porządkowanie: usuń / spam / oferty / zablokuj / przywróć (jedna trasa, także zbiorczo)
+route('POST', '/api/messages/act', (ctx) => {
+  const ids = Array.isArray(ctx.body.ids) ? ctx.body.ids : [];
+  if (!ids.length || ids.length > 1000) bad('Nie wskazano wiadomości');
+  let done; try { done = mark(ctx.user.id, ids, String(ctx.body.action), ctx.body.scope === 'domain' ? 'domain' : 'sender'); } catch (e) { bad(e.message); }
+  return { ok: true, ids: done, count: done.length };
+});
+route('POST', '/api/folders/:cat/empty', (ctx) => {
+  if (ctx.params.cat === 'trash') return { ok: true, count: purgeTrash(ctx.user.id), ids: [] };
+  let ids; try { ids = emptyFolder(ctx.user.id, ctx.params.cat); } catch (e) { bad(e.message); }
+  return { ok: true, count: ids.length, ids };
+});
+route('GET', '/api/rules', (ctx) => ({ rules: db.prepare('SELECT id,kind,value,action,created_at FROM rules WHERE user_id=? ORDER BY created_at DESC').all(ctx.user.id), serverDelete: serverDeleteOn(ctx.user.id), counts: counts(ctx.user.id) }));
+route('DELETE', '/api/rules/:id', (ctx) => {
+  const r = db.prepare('SELECT * FROM rules WHERE id=? AND user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej reguły', 404);
+  db.prepare('DELETE FROM rules WHERE id=?').run(r.id);
+  if (r.action !== 'block') { reclassifyAll(ctx.user.id); }
+  audit(ctx.user.id, 'rule_removed', `${r.kind}:${r.value}`); return { ok: true };
+});
+route('POST', '/api/organize', (ctx) => {
+  if (ctx.body.serverDelete !== undefined) db.prepare("INSERT INTO flags(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value").run(ctx.user.id, 'server_delete', ctx.body.serverDelete ? '1' : '0');
+  const changed = ctx.body.reclassify ? reclassifyAll(ctx.user.id) : 0;
+  return { ok: true, changed, serverDelete: serverDeleteOn(ctx.user.id) };
+});
 route('GET', '/api/search', (ctx) => {
   const fq = ftsQuery(ctx.query.get('q') || '');
   if (!fq) return { messages: [] };
-  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages_fts f JOIN messages m ON m.id=f.rowid WHERE messages_fts MATCH ? AND m.user_id=? ORDER BY m.date DESC LIMIT 40`).all(fq, ctx.user.id);
+  const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages_fts f JOIN messages m ON m.id=f.rowid WHERE messages_fts MATCH ? AND m.user_id=? AND m.cat IN ('inbox','offers') ORDER BY m.date DESC LIMIT 40`).all(fq, ctx.user.id);
   return { messages: withItems(ctx.user.id, rows) };
 });
 route('POST', '/api/send', async (ctx) => {
@@ -232,7 +263,7 @@ route('GET', '/api/today', (ctx) => {
   const open = db.prepare(`SELECT f.*,m.subject,m.from_name,m.id AS mid FROM found_items f JOIN messages m ON m.id=f.message_id WHERE f.user_id=? AND f.status IN ('new','added') AND f.starts_at>=? ORDER BY f.starts_at LIMIT 100`).all(uid, ymd(d0)).map((i) => ({ ...i, link: calendarLink(i) }));
   const done = db.prepare('SELECT COUNT(*) n FROM found_items WHERE user_id=? AND resolved_at>=?').get(uid, d0.getTime()).n;
   const pending = open.filter((i) => i.status === 'new').length;
-  const unread = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid, Date.now()).n;
+  const unread = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1 AND cat=\'inbox\' AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid, Date.now()).n;
   return { items: open, done, pending, unread, now: now.getTime() };
 });
 
@@ -319,6 +350,7 @@ export function createServer() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const server = createServer();
   server.listen(config.port, config.host, () => console.log(`Poczta działa: http://${config.host}:${config.port}`));
+  initialSort();
   startScheduler();
   const stop = () => { server.close(); db.close(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);

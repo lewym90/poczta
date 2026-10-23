@@ -8,6 +8,8 @@ import { extractItems } from './intel/extract.js';
 import { assessRisk } from './intel/risk.js';
 import { notifyNewMessages } from './push.js';
 import { startJobs } from './jobs.js';
+import { classify } from './intel/classify.js';
+import { loadRules } from './mailbox.js';
 
 export const providers = { imap, demo };
 const listeners = new Set();
@@ -24,16 +26,21 @@ export function storeMessages(acc, messages) {
   const insI = db.prepare(`INSERT OR IGNORE INTO found_items(user_id,message_id,kind,title,starts_at,ends_at,all_day,amount,currency,location,confidence,source,evidence,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   let added = 0, items = 0; const fresh = [];
+  const rules = loadRules(acc.user_id);
   tx(() => {
     for (const m of messages) {
       const risk = assessRisk(m);
-      const r = insM.run(acc.user_id, acc.id, 'INBOX', m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
+      const sorted = classify({ ...m, risk: risk.risk }, rules);
+      const blocked = sorted.cat === 'blocked';
+      const r = insM.run(acc.user_id, acc.id, 'INBOX', m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread && !blocked ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
       if (!r.changes) continue;
       added++;
       const id = Number(r.lastInsertRowid);
-      if (m.unread && risk.risk < 2) fresh.push({ id, account_id: acc.id, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
+      db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked ? Date.now() : null, id);
+      if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
-      if (risk.risk >= 2) continue; // z podejrzanych wiadomości nie wyciągamy terminów
+      if (sorted.cat !== 'inbox') continue; // oferty i spam: bez powiadomień i bez wykrywania spraw
+      if (m.unread) fresh.push({ id, account_id: acc.id, fromName: m.fromName || m.fromAddr, subject: m.subject, items: [] });
       for (const it of extractItems({ subject: m.subject, body: m.body, fromName: m.fromName, ics: m.ics, received: new Date(m.date) })) {
         const x = insI.run(acc.user_id, id, it.kind, it.title, it.starts_at, it.ends_at, it.all_day, it.amount ?? null, it.currency ?? null, it.location ?? null, it.confidence, it.source, it.evidence, Date.now());
         items += Number(x.changes);
@@ -103,6 +110,12 @@ export function startScheduler() {
   };
   const t = setInterval(tick, config.syncEverySec * 1000);
   t.unref();
-  const stopJobs = startJobs(emit);
+  const stopJobs = startJobs(emit, {
+    trash: async (accId, uids) => {
+      const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(accId);
+      if (!acc || acc.provider !== 'imap') return uids.length; // demo: nic do przenoszenia
+      return imap.trash({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), uids);
+    },
+  });
   return () => { clearInterval(t); stopJobs(); };
 }

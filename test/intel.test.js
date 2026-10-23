@@ -51,3 +51,27 @@ test('ICS ma pierwszeństwo i pełną pewność', () => {
   const [it] = extractItems({ subject: 'Zaproszenie', body: '', ics: [ics] }, NOW);
   assert.equal(it.source, 'ics'); assert.equal(it.starts_at, '2026-10-29T10:00'); assert.equal(it.location, 'Sala 3');
 });
+
+import { classify } from '../server/intel/classify.js';
+test('klasyfikacja: reklamy trafiają do ofert, ważne zostają w skrzynce', () => {
+  const offer = classify({ fromAddr: 'sklep@shav.example', fromName: 'SHAV', subject: '🔍 Zajrzyj do SHAV 2 - Maszynka do Golenia | WYGRAJ BILETY', body: 'Nowość! Sprawdź nasz sklep. Konkurs trwa do 11.02. Wypisz się z newslettera.', bulk: true });
+  assert.equal(offer.cat, 'offers');
+  assert.equal(classify({ fromAddr: 'x@allegro.example', fromName: 'Allegro Pay', subject: 'Zapłać później, -20% na wszystko', body: 'Kod rabatowy tylko do piątku. Darmowa dostawa. Wypisz się.' }).cat, 'offers');
+  assert.equal(classify({ fromAddr: 'biuro@ksiegowosc.example', subject: 'Faktura nr FV/10/2026', body: 'Kwota do zapłaty 1 240 zł, termin płatności 4.11.' }).cat, 'inbox');
+  assert.equal(classify({ fromAddr: 'marta@gmail.com', subject: 'Re: weekend', body: 'Hej, pasuje Ci sobota?' }).cat, 'inbox');
+  assert.equal(classify({ fromAddr: 'k@kurier.example', subject: 'Twoja paczka jest w drodze', body: 'Numer przesyłki 123. Wypisz się z powiadomień marketingowych.', unsub: true }).cat, 'inbox'); // transakcyjne z linkiem wypisania
+  assert.equal(classify({ fromAddr: 'a@b.example', subject: 'Kasyno online: bonus 500 zł', body: 'Gratulujemy wygranej! Zagraj teraz.' }).cat, 'spam');
+  assert.equal(classify({ fromAddr: 'x@y.xyz', subject: 'Pilne', body: 'x', risk: 2 }).cat, 'spam');
+});
+test('klasyfikacja: reguły użytkownika wygrywają, domena i nadawca', () => {
+  const rules = [{ kind: 'sender', value: 'ok@sklep.example', action: 'inbox' }, { kind: 'domain', value: 'sklep.example', action: 'block' }, { kind: 'sender', value: 'a@x.example', action: 'spam' }];
+  assert.equal(classify({ fromAddr: 'ok@sklep.example', subject: '-50% kod rabatowy', body: 'wypisz się', bulk: true }, rules).cat, 'inbox');
+  assert.equal(classify({ fromAddr: 'inny@sklep.example', subject: 'cześć', body: 'hej' }, rules).cat, 'blocked');
+  assert.equal(classify({ fromAddr: 'A@x.example', subject: 'cześć', body: 'hej' }, rules).cat, 'spam');
+});
+test('sprawy: reklamy i "darmowa dostawa" nie tworzą spraw', () => {
+  const now = new Date('2026-10-23T10:00:00');
+  assert.equal(extractItems({ subject: 'Darmowa dostawa do 31.10!', body: 'Promocja trwa do 31.10. Kup teraz.', received: now }, now).length, 0);
+  assert.equal(extractItems({ subject: 'Paczka od Allegro Pay', body: 'Zamów do 5.11 z darmową dostawą, kod rabatowy -10%.', received: now }, now).length, 0);
+  assert.equal(extractItems({ subject: 'Twoja paczka', body: 'Paczka zostanie dostarczona 28.10 w godz. 14-16 przez kuriera.', received: now }, now)[0]?.kind, 'parcel');
+});

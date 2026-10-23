@@ -63,6 +63,17 @@ export const imap = {
     out.sort((a, b) => a.uid - b.uid);
     return { messages: out, lastUid: out.length ? out[out.length - 1].uid : lastUid };
   },
+  // Trwałe połączenie z IDLE. Zwraca funkcję zatrzymującą.
+  async watch(cfg, pass, { onExists, onClose }) {
+    await assertPublicHost(cfg.imap.host);
+    const c = client(cfg, pass);
+    c.on('error', () => {});
+    c.on('exists', () => onExists());
+    c.on('close', () => onClose());
+    await c.connect();
+    await c.mailboxOpen('INBOX'); // ImapFlow wchodzi w IDLE automatycznie, gdy nic innego się nie dzieje
+    return () => c.logout().catch(() => {});
+  },
   async setSeen(cfg, pass, uid, seen) {
     const c = client(cfg, pass);
     try {

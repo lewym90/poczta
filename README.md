@@ -9,6 +9,7 @@ płatności i paczki w wiadomościach i dodaje je do Kalendarza po Twoim potwier
   faktur z kwotą, przesyłek. Pierścień pilności na każdej wiadomości.
 - **Kalendarz**: link do aplikacji Kalendarz albo plik `.ics`. Nic nie jest dodawane bez potwierdzenia (patrz `docs/kalendarz-patch.md`).
 - **Ochrona przed oszustwem**: lokalne sygnały (domena, presja czasu, prośba o dane). Z podejrzanych wiadomości nie wyciągamy terminów.
+- **Nowe wiadomości na żywo** (IMAP IDLE, z automatycznym ponawianiem) i **powiadomienia push** na iPhone'a (iOS 16.4+, po dodaniu do ekranu początkowego). Powiadomienie niesie też wykryty termin.
 - Dostawcy: IMAP/SMTP (Gmail i iCloud przez hasło aplikacji, WP, O2, Onet, Interia i inne) + konto demo.
 - Prywatność: hasła skrzynek szyfrowane AES-256-GCM, fonty i skrypty lokalne, brak zewnętrznych wywołań. Treści nie opuszczają serwera.
 - Gotowe pod sprzedaż: `user_id` w każdej tabeli, interfejs adaptera dostawcy, konfiguracja z env, dziennik audytu, migracje, limity, testy.
@@ -40,6 +41,6 @@ deploy/   install.sh
 ```
 
 ## Dalsze etapy
-2. Logowanie Google/Microsoft przez OAuth (bez haseł aplikacji), IMAP IDLE (natychmiastowe nowe wiadomości), powiadomienia Web Push.
+2. Logowanie Google/Microsoft przez OAuth (bez haseł aplikacji), poranne i wieczorne podsumowania push, przypomnienia o terminach.
 3. Gemini (płatny klucz, na żądanie, z dziennikiem AI) do trudniejszych dat i szkiców odpowiedzi. Odpowiedź głosem, odkładanie, zobowiązania.
 4. Passkey/Face ID, HTML wiadomości w piaskownicy (bez zdalnych obrazów), załączniki, wiele użytkowników, rozliczenia.

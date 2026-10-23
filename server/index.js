@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { db, audit } from './db.js';
 import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, destroySession, rateLimit } from './security.js';
-import { providers, syncAccount, storeMessages, startScheduler, onEvent, accountSecret } from './sync.js';
+import { providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
+import { vapidPublicKey, sendToUser } from './push.js';
 import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
 
@@ -87,7 +88,7 @@ route('POST', '/api/login', async (ctx) => {
 route('POST', '/api/logout', (ctx) => { destroySession(ctx.token); ctx.headers['Set-Cookie'] = sessionCookie('', 0); return { ok: true }; });
 
 // konta
-const publicAcc = (a) => ({ id: a.id, label: a.label, provider: a.provider, email: a.email, status: a.status, last_sync: a.last_sync, last_error: a.last_error, count: db.prepare('SELECT COUNT(*) n FROM messages WHERE account_id=?').get(a.id).n });
+const publicAcc = (a) => ({ id: a.id, label: a.label, provider: a.provider, email: a.email, live: watching(a.id), status: a.status, last_sync: a.last_sync, last_error: a.last_error, count: db.prepare('SELECT COUNT(*) n FROM messages WHERE account_id=?').get(a.id).n });
 route('GET', '/api/accounts', (ctx) => ({ accounts: db.prepare('SELECT * FROM accounts WHERE user_id=? ORDER BY id').all(ctx.user.id).map(publicAcc) }));
 route('GET', '/api/presets', (ctx) => { const p = presetFor(ctx.query.get('email') || ''); return { preset: p ? { name: p.name, note: p.note } : null }; });
 route('POST', '/api/accounts', async (ctx) => {
@@ -110,7 +111,7 @@ route('POST', '/api/accounts', async (ctx) => {
     .run(ctx.user.id, String(ctx.body.label || p?.name || email).slice(0, 40), 'imap', email.toLowerCase(), JSON.stringify(cfg), encrypt(password), Date.now());
   audit(ctx.user.id, 'account_added', email);
   const id = Number(r.lastInsertRowid);
-  syncAccount(id);
+  syncAccount(id).then(() => watchAccount(id));
   return { account: publicAcc(db.prepare('SELECT * FROM accounts WHERE id=?').get(id)) };
 });
 route('POST', '/api/accounts/demo', async (ctx) => {
@@ -127,6 +128,7 @@ route('POST', '/api/accounts/:id/sync', async (ctx) => {
 route('DELETE', '/api/accounts/:id', (ctx) => {
   const r = db.prepare('DELETE FROM accounts WHERE id=? AND user_id=?').run(+ctx.params.id, ctx.user.id);
   if (!r.changes) bad('Nie ma takiego konta', 404);
+  unwatchAccount(+ctx.params.id);
   db.exec("DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages)");
   audit(ctx.user.id, 'account_removed', ctx.params.id); return { ok: true };
 });
@@ -205,6 +207,23 @@ route('GET', '/api/today', (ctx) => {
   const pending = open.filter((i) => i.status === 'new').length;
   const unread = db.prepare('SELECT COUNT(*) n FROM messages WHERE user_id=? AND unread=1').get(uid).n;
   return { items: open, done, pending, unread, now: now.getTime() };
+});
+
+// powiadomienia push (Web Push, iOS 16.4+ po dodaniu do ekranu początkowego)
+route('GET', '/api/push/key', () => ({ key: vapidPublicKey() }));
+route('POST', '/api/push/subscribe', (ctx) => {
+  const s = ctx.body.subscription;
+  if (!s?.endpoint || !/^https:\/\//.test(s.endpoint) || !s.keys?.p256dh || !s.keys?.auth) bad('Niepoprawna subskrypcja');
+  db.prepare(`INSERT INTO push_subs(user_id,endpoint,p256dh,auth,ua,created_at) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,p256dh=excluded.p256dh,auth=excluded.auth,ua=excluded.ua`)
+    .run(ctx.user.id, s.endpoint, s.keys.p256dh, s.keys.auth, String(ctx.req.headers['user-agent'] || '').slice(0, 200), Date.now());
+  audit(ctx.user.id, 'push_on'); return { ok: true };
+});
+route('POST', '/api/push/unsubscribe', (ctx) => { db.prepare('DELETE FROM push_subs WHERE endpoint=? AND user_id=?').run(String(ctx.body.endpoint || ''), ctx.user.id); return { ok: true }; });
+route('POST', '/api/push/test', async (ctx) => {
+  const n = await sendToUser(ctx.user.id, { title: 'Poczta', body: 'Powiadomienia działają.', url: './#/', tag: 'test' });
+  if (!n) bad('Brak aktywnych urządzeń z powiadomieniami');
+  return { ok: true, sent: n };
 });
 
 // zdarzenia na żywo (SSE)

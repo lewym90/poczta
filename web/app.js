@@ -215,9 +215,10 @@ async function viewAccounts() {
   paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Konta i prywatność</span></div>
     ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
     <div class="actions" style="margin-top:14px"><button class="btn pri grow" data-act="addacc">${ic('plus', 'i18')}Dodaj skrzynkę</button>${S.demoAllowed && !S.accounts.some((a) => a.provider === 'demo') ? '<button class="btn" data-act="demo">Tryb demo</button>' : ''}</div>
+    <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
     <div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
-  nav('accounts');
+  nav('accounts'); renderPushCard();
 }
 
 function viewAuth() {
@@ -230,6 +231,38 @@ function viewAuth() {
     catch (e) { $('#err').textContent = e.message; b.disabled = false; }
   };
 }
+
+// ---- powiadomienia push ----
+const b64 = (k) => { const p = '='.repeat((4 - (k.length % 4)) % 4), r = atob((k + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...r].map((c) => c.charCodeAt(0))); };
+async function pushState() {
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (!('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window))
+    return { ok: false, why: standalone ? 'Ta przeglądarka nie obsługuje powiadomień.' : 'Na iPhonie powiadomienia działają po dodaniu aplikacji do ekranu początkowego: Udostępnij → Do ekranu początkowego, potem otwórz ją stamtąd.' };
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 3000))]);
+  if (!reg) return { ok: false, why: 'Aplikacja jeszcze się przygotowuje (tryb offline). Odśwież za chwilę.' };
+  const sub = await reg.pushManager.getSubscription();
+  return { ok: true, perm: Notification.permission, on: !!sub && Notification.permission === 'granted', reg, sub };
+}
+async function renderPushCard() {
+  const el = $('#pushcard'); if (!el) return;
+  const st = await pushState().catch(() => ({ ok: false, why: 'Nie udało się sprawdzić powiadomień.' }));
+  if (!$('#pushcard')) return;
+  const live = S.accounts.some((a) => a.live);
+  const head = `<div class="k mono" style="color:${live ? 'var(--ok)' : 'var(--ink2)'}">${ic('spark', 'i14')}${live ? 'Nowe wiadomości na żywo' : 'Sprawdzanie co kilka minut'}</div>`;
+  el.innerHTML = head + (!st.ok ? `<div class="wh" style="line-height:21px;margin-top:8px">${esc(st.why)}</div>`
+    : st.perm === 'denied' ? `<div class="wh" style="line-height:21px;margin-top:8px">Powiadomienia są zablokowane. Włącz je w Ustawienia iPhone'a → Poczta → Powiadomienia.</div>`
+    : st.on ? `<div class="wh" style="line-height:21px;margin-top:8px">Powiadomienia włączone na tym urządzeniu. Dostaniesz je, gdy przyjdzie nowa wiadomość, także z wykrytym terminem.</div><div class="actions"><button class="btn grow" data-act="pushtest">Wyślij testowe</button><button class="btn" data-act="pushoff">Wyłącz</button></div>`
+    : `<div class="wh" style="line-height:21px;margin-top:8px">Otrzymasz powiadomienie o nowej wiadomości, także z wykrytym terminem. Treść idzie przez serwery Apple tylko jako zaszyfrowany sygnał.</div><div class="actions"><button class="btn pri grow" data-act="pushon">${ic('spark', 'i18')}Włącz powiadomienia</button></div>`);
+}
+async function pushOn() {
+  const st = await pushState(); if (!st.ok) throw new Error(st.why);
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Nie przyznano zgody na powiadomienia');
+  const { key } = await get('/api/push/key');
+  const sub = st.sub || await st.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+  await post('/api/push/subscribe', { subscription: sub.toJSON() });
+}
+async function pushOff() { const st = await pushState(); if (st.sub) { await post('/api/push/unsubscribe', { endpoint: st.sub.endpoint }).catch(() => {}); await st.sub.unsubscribe(); } }
 
 // ---- arkusze ----
 function calSheet(it) {
@@ -308,6 +341,9 @@ document.addEventListener('click', async (ev) => {
     else if (d.act === 'addacc') addAccSheet();
     else if (d.act === 'demo') { await post('/api/accounts/demo'); toast('Dodano konto demo'); route(); }
     else if (d.act === 'logout') { await post('/api/logout'); S.user = null; location.hash = '#/login'; route(); }
+    else if (d.act === 'pushon') { await pushOn(); toast('Powiadomienia włączone'); renderPushCard(); }
+    else if (d.act === 'pushoff') { await pushOff(); toast('Wyłączono'); renderPushCard(); }
+    else if (d.act === 'pushtest') { await post('/api/push/test'); toast('Wysłano testowe'); }
     else if (d.act === 'close') closeSheet();
     else if (d.act === 'back') go('#/');
     else if (d.act === 'reveal') { $('#body')?.classList.remove('dim'); el.closest('.risk').remove(); }

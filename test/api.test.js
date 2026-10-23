@@ -83,3 +83,24 @@ test('izolacja: inny użytkownik nie widzi cudzych danych (zapytania filtrują p
 test('statyka: zła ścieżka nie wychodzi poza katalog web', async () => {
   const r = await fetch(base + '/..%2Fserver%2Fconfig.js'); assert.notEqual(r.status, 200);
 });
+
+test('push: klucz VAPID, zapis i usuwanie subskrypcji, walidacja', async () => {
+  const k = (await api('GET', '/api/push/key')).body.key; assert.ok(k && k.length > 60);
+  assert.equal((await api('POST', '/api/push/subscribe', { subscription: { endpoint: 'http://nie-https', keys: {} } })).status, 400);
+  const sub = { endpoint: 'https://push.example.com/abc', keys: { p256dh: 'BKey', auth: 'aKey' } };
+  assert.equal((await api('POST', '/api/push/subscribe', { subscription: sub })).status, 200);
+  const { db } = await import('../server/db.js');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM push_subs').get().n, 1);
+  assert.equal((await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint })).status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM push_subs').get().n, 0);
+  assert.equal((await api('POST', '/api/push/test')).status, 400); // brak urządzeń
+});
+test('powiadomienia: nowe wiadomości po pierwszej synchronizacji trafiają do listy, pierwsza nie', async () => {
+  const { storeMessages } = await import('../server/sync.js');
+  const { db } = await import('../server/db.js');
+  const acc = db.prepare("SELECT * FROM accounts WHERE provider='demo'").get();
+  const m = { uid: 99, messageId: '<x@y>', fromName: 'Kurier', fromAddr: 'k@kurier.pl', toAddr: 't@t.pl', subject: 'Paczka jutro 10:00', body: 'Kurier doręczy paczkę jutro 10:00', snippet: 'x', date: Date.now(), unread: true, hasAttach: false, ics: [] };
+  const r = storeMessages(acc, [m]);
+  assert.equal(r.fresh.length, 1); assert.equal(r.fresh[0].items[0].kind, 'parcel');
+  assert.equal(storeMessages(acc, [m]).fresh.length, 0); // duplikat
+});

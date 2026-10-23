@@ -27,7 +27,18 @@ const KIND_ICON = { event: 'cal', deadline: 'coin', parcel: 'box' };
 const KIND_LABEL = { event: 'Wydarzenie', deadline: 'Termin płatności', parcel: 'Przesyłka' };
 
 // ---- API ----
+// cienki pasek postępu u góry, widoczny tylko gdy żądanie trwa dłużej niż 250 ms
+let inflight = 0, progT = 0;
+const progress = (d) => {
+  inflight += d; const el = document.getElementById('prog'); if (!el) return;
+  clearTimeout(progT);
+  if (inflight > 0) progT = setTimeout(() => el.classList.add('on'), 250); else el.classList.remove('on');
+};
 async function api(method, url, body) {
+  progress(1);
+  try { return await api0(method, url, body); } finally { progress(-1); }
+}
+async function api0(method, url, body) {
   const r = await fetch(url.replace(/^\//, ''), { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Poczta': '1' }, body: body ? JSON.stringify(body) : undefined });
   let j = {}; try { j = await r.json(); } catch { /* brak treści */ }
   if (r.status === 401 && S.user) { S.user = null; go('#/login'); }
@@ -195,7 +206,7 @@ async function loadMore(btn) {
 }
 function chipsHtml(c = {}) {
   const k = (id, l, n, cls = '') => `<button class="chip ${cls}" data-filter="${id}" aria-pressed="${S.filter === id}">${l}${n ? `<b class="cn mono" id="cnt-${id}">${n}</b>` : ''}</button>`;
-  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + `<button class="chip" data-act="folders">Foldery…</button>`;
+  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + ((S.accounts || []).some((a) => a.provider === 'imap') ? `<button class="chip" data-act="folders">Foldery…</button>` : '');
 }
 function bulkHtml(m) {
   const f = S.filter, n = (m.counts || {})[f];
@@ -548,7 +559,7 @@ async function composeSheet(opts = {}) {
     <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" rows="9">${esc(text)}</textarea></div>
     <div class="cfiles" id="cfiles"></div>
     <div class="err" id="err" role="alert"></div>
-    <div class="actions" style="margin-top:12px"><label class="btn" style="cursor:pointer">${ic('clip', 'i18')}Załącznik<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Zapisz szkic</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
+    <div class="actions cact" style="margin-top:12px"><label class="btn" style="cursor:pointer">${ic('clip', 'i18')}Załącznik<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Szkic</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
     const ta = $('#ctx', sh); ta.setSelectionRange(0, 0); setTimeout(() => (mode === 'new' || mode === 'draft' || mode === 'again' ? $('#cto', sh) : ta).focus(), 450);
     const paintFiles = () => { $('#cfiles', sh).innerHTML = files.map((f, i) => `<span class="cfile gl">${ic('clip', 'i14')}<span>${esc(f.name)} · ${fmtSize(f.size)}</span><button type="button" data-rmf="${i}" aria-label="Usuń załącznik">${ic('x', 'i14')}</button></span>`).join(''); };
     $('#showcc', sh)?.addEventListener('click', (e) => { $('#ccbox', sh).hidden = false; e.currentTarget.remove(); $('#ccc', sh).focus(); });
@@ -740,3 +751,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.user && /^(#\/?|#\/today)?$/.test(location.hash) && !$('#sheet-root').firstChild) { S.animate = false; route(); } });
 }
 boot();
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });

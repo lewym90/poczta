@@ -78,3 +78,12 @@ Uwaga: administrator serwera technicznie ma dostęp do bazy i klucza szyfrujące
 - **Załączniki**: lista pod nagłówkiem wiadomości; obrazy i PDF otwierają się w podglądzie, reszta pobiera się jako plik. Treść pobierana jest z serwera poczty na żądanie (limit 40 MB), małe obrazki inline (`cid:`) są zapisane i widać je w oryginale maila.
 - **Wysłane i Szkice**: osobne zakładki, synchronizowane co najwyżej co 90 s. Szkic otwiera się do edycji i wysyłki. Usunięcie wiadomości z tych folderów przenosi ją do kosza u dostawcy z właściwego folderu.
 - **Starsza poczta**: przycisk „Wczytaj starsze” najpierw stronicuje to, co jest lokalnie, a potem dociąga kolejne 60 wiadomości z serwera poczty.
+
+## Pisanie i porządkowanie (etap 5)
+
+- **Kompozytor**: Do / Dw / UDW, odpowiedz wszystkim, przekaż dalej (z załącznikami oryginału), własne załączniki (do 10 MB razem), podpis (Konta → Podpis), zapis szkicu u dostawcy (Szkic).
+- **Gwiazdki i Archiwum**: gwiazdka synchronizuje się z flagą `\Flagged`; archiwizacja przenosi wiadomość do archiwum dostawcy po 12 s karencji (można cofnąć).
+- **Foldery dostawcy**: chip „Foldery…” otwiera dowolny folder lub etykietę (ostatnie 40 wiadomości, tylko do czytania i usuwania).
+- **Rozmowy**: wiadomości o tym samym temacie (bez Re:/Fwd:) w jednej skrzynce są powiązane; licznik na liście, sekcja „W tej rozmowie” w wiadomości.
+- **Cofnij** po oznaczeniu spamu/oferty/blokady usuwa też regułę nadawcy.
+- **Znane ograniczenia**: gwiazdka i flaga „przeczytane” zmienione poza Pocztą nie są jeszcze odświeżane dla już pobranych wiadomości; cofnięcie archiwizacji po wykonaniu jej u dostawcy przywraca tylko widok w aplikacji.

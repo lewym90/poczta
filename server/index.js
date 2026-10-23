@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { db, audit } from './db.js';
 import { encrypt, hashPassword, verifyPassword, createSession, sessionUser, destroySession, rateLimit } from './security.js';
-import { providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
+import { loadOlder, folderPath, syncFolders, providers, syncAccount, startScheduler, onEvent, accountSecret, watchAccount, unwatchAccount, watching } from './sync.js';
 import { mark, restore, emptyFolder, purgeTrash, reclassifyAll, counts, loadRules, addRule, applyRuleNow, initialSort } from './mailbox.js';
 import { serverDeleteOn } from './jobs.js';
 import zlib from 'node:zlib';
@@ -53,7 +53,7 @@ function withItems(uid, rows) {
   for (const it of items) { if (!by.has(it.message_id)) by.set(it.message_id, []); by.get(it.message_id).push(it); }
   return rows.map((r) => { const its = by.get(r.id) || []; const open = its.filter((i) => i.status === 'new'); return { ...r, unread: !!r.unread, has_attach: !!r.has_attach, items: its, open_items: open.length, urgency: urgency(open[0]?.starts_at) }; });
 }
-const MSG_COLS = 'm.id,m.account_id,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why';
+const MSG_COLS = 'm.id,m.account_id,m.to_addr,m.from_name,m.from_addr,m.subject,m.snippet,m.date,m.unread,m.has_attach,m.risk,m.snoozed_until,m.woke_at,m.cat,m.cat_why';
 
 function ftsQuery(q) {
   const toks = String(q).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
@@ -193,7 +193,7 @@ route('GET', '/api/messages', (ctx) => {
   if (acc) { where.push('m.account_id=?'); args.push(acc); }
   if (before) { where.push('m.date<?'); args.push(before); }
   const now = Date.now();
-  const FOLDERS = { offers: 'offers', spam: 'spam', trash: 'trash' };
+  const FOLDERS = { offers: 'offers', spam: 'spam', trash: 'trash', sent: 'sent', drafts: 'drafts' };
   if (FOLDERS[tab]) where.push('m.cat=?'), args.push(FOLDERS[tab]);
   else {
     where.push("m.cat='inbox'");
@@ -218,7 +218,7 @@ route('GET', '/api/messages/:id', async (ctx) => {
     if (!m.html_try) { // dociąganie w tle: otwarcie wiadomości nie czeka na serwer poczty
       db.prepare('UPDATE messages SET html_try=1 WHERE id=?').run(m.id);
       const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
-      const job = Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 20000))])
+      const job = Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid, folderPath(m.account_id, m.folder)), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 20000))])
         .then((h) => { if (h) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(h)), m.id); else db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); return h || ''; })
         .catch(() => { db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); return ''; });
       rawHtml = await Promise.race([job, new Promise((r) => setTimeout(() => r(null), 4000))]) ?? ''; // krótko czekamy, żeby szybkie dociągnięcie było od razu widoczne
@@ -226,9 +226,40 @@ route('GET', '/api/messages/:id', async (ctx) => {
     } else if (m.html_try === 1) pending = true;
   }
   const pref = imagesOn(ctx.user.id), images = pref || ctx.query.get('images') === '1';
-  const cleaned = rawHtml ? cleanHtml(rawHtml, { images }) : null;
+  const atts = db.prepare('SELECT idx,filename,ctype,size,cid,inline,data IS NOT NULL AS has_data FROM attachments WHERE message_id=? ORDER BY idx').all(m.id);
+  const cids = new Map(atts.filter((x) => x.inline && x.cid && x.has_data).map((x) => [x.cid, x.idx]));
+  const cleaned = rawHtml ? cleanHtml(rawHtml, { images, cid: (c) => (cids.has(c) ? `api/messages/${m.id}/att/${cids.get(c)}?view=1` : null) }) : null;
   return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why,
+    attachments: atts.filter((x) => !x.inline).map((x) => ({ idx: x.idx, filename: x.filename, ctype: x.ctype, size: x.size })),
     frame: cleaned ? frameDoc(cleaned.html) : null, html_pending: pending && !cleaned, remote_images: cleaned ? cleaned.remote : 0, images_blocked: !!(cleaned && cleaned.remote && !images) }, items };
+});
+// starsze wiadomości z serwera poczty (wszystkie skrzynki użytkownika albo jedna)
+route('POST', '/api/history', async (ctx) => {
+  if (!rateLimit(`hist:${ctx.user.id}`, 20, 60e3)) bad('Chwila, za dużo naraz', 429);
+  const only = +ctx.body.account_id || 0;
+  const accs = db.prepare("SELECT id FROM accounts WHERE user_id=? AND provider='imap'").all(ctx.user.id).filter((a) => !only || a.id === only);
+  let added = 0, left = 0;
+  for (const a of accs) { try { const r = await loadOlder(a.id, 60); added += r.added; left += r.left; } catch { /* kolejna skrzynka */ } }
+  return { added, left };
+});
+// pobieranie załącznika; podgląd (view=1) tylko dla obrazów i PDF, reszta zawsze jako pobranie
+const VIEWABLE = /^(image\/(png|jpe?g|gif|webp|avif)|application\/pdf)$/i;
+route('GET', '/api/messages/:id/att/:idx', async (ctx) => {
+  if (!rateLimit(`att:${ctx.user.id}`, 60, 60e3)) bad('Za dużo pobrań, spróbuj za chwilę', 429);
+  const m = db.prepare('SELECT m.id,m.uid,m.folder,m.account_id FROM messages m WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
+  const a = db.prepare('SELECT * FROM attachments WHERE message_id=? AND idx=? AND user_id=?').get(m.id, +ctx.params.idx, ctx.user.id) || bad('Nie ma takiego załącznika', 404);
+  let buf = a.data, type = a.ctype || 'application/octet-stream';
+  if (!buf) {
+    const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
+    if (!acc || acc.provider !== 'imap') bad('Załącznik niedostępny', 404);
+    const path = m.folder === 'INBOX' ? 'INBOX' : (db.prepare('SELECT path FROM folder_state WHERE account_id=? AND folder=?').get(m.account_id, m.folder)?.path || bad('Folder niedostępny', 404));
+    let r; try { r = await providers.imap.fetchAttachment({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid, a.idx, path); } catch { bad('Nie udało się pobrać załącznika z serwera poczty', 502); }
+    if (!r) bad('Załącznik nie istnieje już na serwerze poczty', 404);
+    buf = r.content;
+  }
+  const view = ctx.query.get('view') === '1' && VIEWABLE.test(type);
+  const name = (a.filename || 'zalacznik').replace(/[\r\n"\\]/g, '_');
+  ctx.raw = { type: view ? type : 'application/octet-stream', body: buf, headers: { 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': view && /pdf/i.test(type) ? "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'" : "default-src 'none'; sandbox", 'Content-Disposition': `${view ? 'inline' : 'attachment'}; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(a.filename || 'zalacznik')}` } };
 });
 route('GET', '/api/img', async (ctx) => {
   if (!rateLimit(`img:${ctx.user.id}`, 900, 300e3)) bad('Za dużo obrazków naraz', 429);
@@ -293,6 +324,7 @@ route('POST', '/api/send', async (ctx) => {
   if (acc.provider !== 'demo' && !cfg.smtp) bad('To konto nie ma skonfigurowanego serwera wysyłki (SMTP)');
   await providers[acc.provider].send({ ...cfg, email: acc.email }, accountSecret(acc), { from: acc.email, to: rcpt.join(', '), subject: String(subject || '').slice(0, 250), text: String(text).slice(0, 200000), inReplyTo: in_reply_to });
   audit(ctx.user.id, 'sent', `${acc.email} -> ${rcpt.length}`);
+  if (acc.provider === 'imap') setTimeout(() => syncFolders(acc.id, { force: true }).catch(() => {}), 3000); // dostawca zapisuje wysłaną kopię w Wysłanych
   return { ok: true };
 });
 

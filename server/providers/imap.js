@@ -18,10 +18,16 @@ function htmlToText(html) {
     .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const INLINE_MAX = 400 * 1024;
 async function normalize(msg) {
   const p = await simpleParser(msg.source);
-  const ics = [];
-  for (const a of p.attachments || []) if (/calendar/i.test(a.contentType) || /\.ics$/i.test(a.filename || '')) ics.push(a.content.toString('utf8'));
+  const ics = [], atts = [];
+  (p.attachments || []).forEach((a, idx) => {
+    if (/calendar/i.test(a.contentType) || /\.ics$/i.test(a.filename || '')) { ics.push(a.content.toString('utf8')); return; }
+    const inline = !!(a.cid && (a.related || a.contentDisposition === 'inline') && /^image\//i.test(a.contentType));
+    atts.push({ idx, filename: a.filename || (inline ? 'obraz' : `załącznik-${idx + 1}`), ctype: a.contentType || 'application/octet-stream', size: a.size || a.content?.length || 0,
+      cid: a.cid ? String(a.cid).replace(/^<|>$/g, '') : null, inline, data: inline && a.content && a.content.length <= INLINE_MAX ? a.content : null });
+  });
   const body = (p.text || htmlToText(p.html || '')).replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
   const from = p.from?.value?.[0] || {};
   return {
@@ -29,7 +35,7 @@ async function normalize(msg) {
     fromName: from.name || from.address || '', fromAddr: from.address || '', toAddr: (p.to?.value || []).map((x) => x.address).join(', '),
     subject: p.subject || '(bez tematu)', body, snippet: body.replace(/\s+/g, ' ').slice(0, 160),
     date: (p.date || msg.internalDate || new Date()).getTime(), unread: !msg.flags?.has('\\Seen'),
-    hasAttach: (p.attachments || []).some((a) => !/calendar/i.test(a.contentType)), ics,
+    hasAttach: atts.some((a) => !a.inline), atts, ics,
     html: typeof p.html === 'string' ? p.html : '',
     unsub: !!p.headers?.get('list-unsubscribe'),
     bulk: /^(bulk|list|junk)$/i.test(String(p.headers?.get('precedence') || '')) || !!p.headers?.get('list-id') || !!p.headers?.get('x-campaign') || !!p.headers?.get('x-mailchimp-id') || !!p.headers?.get('feedback-id'),
@@ -48,11 +54,11 @@ export const imap = {
     }
   },
   // Pobiera nowe wiadomości od lastUid (pierwszy raz: ostatnie `first`).
-  async sync(cfg, pass, { lastUid = 0, first = 60 } = {}) {
+  async sync(cfg, pass, { lastUid = 0, first = 60, path = 'INBOX' } = {}) {
     const c = client(cfg, pass); const out = [];
     try {
       await c.connect();
-      const lock = await c.getMailboxLock('INBOX');
+      const lock = await c.getMailboxLock(path);
       try {
         const total = c.mailbox.exists;
         if (!total) return { messages: [], lastUid };
@@ -66,6 +72,22 @@ export const imap = {
     out.sort((a, b) => a.uid - b.uid);
     return { messages: out, lastUid: out.length ? out[out.length - 1].uid : lastUid };
   },
+  // Starsze wiadomości (UID mniejsze niż beforeUid): kolejna porcja `count`. `left` mówi, ile jeszcze zostało na serwerze.
+  async history(cfg, pass, { beforeUid, count = 60 }) {
+    const c = client(cfg, pass), out = [];
+    try {
+      await c.connect();
+      const lock = await c.getMailboxLock('INBOX');
+      try {
+        const all = beforeUid > 1 ? await c.search({ uid: `1:${beforeUid - 1}` }, { uid: true }) : [];
+        const take = (all || []).sort((a, b) => a - b).slice(-count);
+        if (take.length) for await (const m of c.fetch(take.join(','), { uid: true, flags: true, internalDate: true, source: { maxLength: 3 * 1024 * 1024 } }, { uid: true })) {
+          try { out.push(await normalize(m)); } catch { /* pomijamy uszkodzoną */ }
+        }
+        return { messages: out.sort((a, b) => a.uid - b.uid), left: Math.max(0, (all || []).length - take.length) };
+      } finally { lock.release(); }
+    } finally { await c.logout().catch(() => {}); }
+  },
   // Trwałe połączenie z IDLE. Zwraca funkcję zatrzymującą.
   async watch(cfg, pass, { onExists, onClose }) {
     await assertPublicHost(cfg.imap.host);
@@ -78,16 +100,30 @@ export const imap = {
     return () => c.logout().catch(() => {});
   },
   // Dociąga oryginalny HTML jednej wiadomości (dla starszych, pobranych zanim zaczęliśmy go zapisywać).
-  async fetchHtml(cfg, pass, uid) {
+  async fetchHtml(cfg, pass, uid, path = 'INBOX') {
     const c = client(cfg, pass);
     try {
       await c.connect();
-      const lock = await c.getMailboxLock('INBOX');
+      const lock = await c.getMailboxLock(path);
       try {
         const m = await c.fetchOne(String(uid), { uid: true, source: { maxLength: 6 * 1024 * 1024 } }, { uid: true });
         if (!m?.source) return '';
         const n = await normalize({ ...m, flags: new Set() });
         return n.html || '';
+      } finally { lock.release(); }
+    } finally { await c.logout().catch(() => {}); }
+  },
+  // Pobiera jeden załącznik (po indeksie w strukturze wiadomości) wprost z serwera poczty.
+  async fetchAttachment(cfg, pass, uid, idx, folderPath = 'INBOX') {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      const lock = await c.getMailboxLock(folderPath);
+      try {
+        const m = await c.fetchOne(String(uid), { uid: true, source: { maxLength: 40 * 1024 * 1024 } }, { uid: true });
+        if (!m?.source) return null;
+        const a = (await simpleParser(m.source)).attachments?.[idx];
+        return a ? { filename: a.filename, ctype: a.contentType, content: a.content } : null;
       } finally { lock.release(); }
     } finally { await c.logout().catch(() => {}); }
   },
@@ -99,21 +135,31 @@ export const imap = {
       const lock = await c.getMailboxLock('INBOX');
       try {
         for await (const m of c.fetch(uids.join(','), { uid: true, source: { maxLength: 6 * 1024 * 1024 } }, { uid: true })) {
-          try { out.push({ uid: m.uid, html: (await normalize({ ...m, flags: new Set() })).html || '' }); } catch { out.push({ uid: m.uid, html: '' }); }
+          try { const n = await normalize({ ...m, flags: new Set() }); out.push({ uid: m.uid, html: n.html || '', atts: n.atts }); } catch { out.push({ uid: m.uid, html: '', atts: null }); }
         }
       } finally { lock.release(); }
     } finally { await c.logout().catch(() => {}); }
     return out;
   },
   // Przenosi wiadomości do kosza u dostawcy (odwracalne u niego przez ok. 30 dni). Zwraca liczbę przeniesionych.
-  async trash(cfg, pass, uids) {
+  // Znajduje foldery specjalne (Wysłane, Szkice) po atrybucie \\Sent / \\Drafts, a gdy go brak, po typowych nazwach.
+  async listSpecial(cfg, pass) {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      const boxes = await c.list();
+      const find = (use, re) => (boxes.find((b) => b.specialUse === use) || boxes.find((b) => re.test(b.path) || re.test(b.name)))?.path || '';
+      return { sent: find('\\Sent', /^(\[gmail\]\/)?(sent( mail| items| messages)?|wys[łl]ane|elementy wys[łl]ane)$/i), drafts: find('\\Drafts', /^(\[gmail\]\/)?(drafts?|szkice|wersje robocze)$/i) };
+    } finally { await c.logout().catch(() => {}); }
+  },
+  async trash(cfg, pass, uids, path = 'INBOX') {
     const c = client(cfg, pass);
     try {
       await c.connect();
       const boxes = await c.list();
       const t = boxes.find((b) => b.specialUse === '\\Trash') || boxes.find((b) => /^(trash|kosz|deleted( items| messages)?|elementy usuni[ęe]te|\[gmail\]\/(trash|kosz))$/i.test(b.path) || /^(trash|kosz)$/i.test(b.name));
       if (!t) throw new Error('Nie znaleziono kosza u dostawcy');
-      const lock = await c.getMailboxLock('INBOX');
+      const lock = await c.getMailboxLock(path);
       try { await c.messageMove(uids.join(','), t.path, { uid: true }); } finally { lock.release(); }
       return uids.length;
     } finally { await c.logout().catch(() => {}); }

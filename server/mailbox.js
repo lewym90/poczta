@@ -4,7 +4,7 @@ import { classify, addrDomain, isFreemail } from './intel/classify.js';
 import { assessRisk } from './intel/risk.js';
 import { extractItems } from './intel/extract.js';
 
-export const CATS = ['inbox', 'offers', 'spam', 'trash', 'blocked'];
+export const CATS = ['inbox', 'offers', 'spam', 'trash', 'blocked', 'sent', 'drafts'];
 const ph = (a) => a.map(() => '?').join(',');
 const inboxSql = "cat='inbox'";
 
@@ -20,7 +20,7 @@ export function addRule(uid, kind, value, action) {
 
 // Wiadomości użytkownika pasujące do reguły (nie licząc tych już w koszu/zablokowanych, chyba że blokujemy).
 function matching(uid, kind, value) {
-  return db.prepare(`SELECT id,cat FROM messages WHERE user_id=? AND ${kind === 'domain' ? "lower(substr(from_addr, instr(from_addr,'@')+1))=?" : 'lower(from_addr)=?'}`).all(uid, value);
+  return db.prepare(`SELECT id,cat FROM messages WHERE user_id=? AND folder='INBOX' AND ${kind === 'domain' ? "lower(substr(from_addr, instr(from_addr,'@')+1))=?" : 'lower(from_addr)=?'}`).all(uid, value);
 }
 
 export function reextract(id) {
@@ -77,7 +77,7 @@ export function mark(uid, ids, action, scope = 'sender') {
   if (action === 'delete') return moveTo(uid, ids, 'trash');
   if (action === 'restore') return restore(uid, ids);
   if (!['spam', 'offers', 'inbox', 'block'].includes(action)) throw new Error('Nieznana czynność');
-  const rows = db.prepare(`SELECT id,from_addr FROM messages WHERE user_id=? AND id IN (${ph(ids)})`).all(uid, ...ids);
+  const rows = db.prepare(`SELECT id,from_addr FROM messages WHERE user_id=? AND folder='INBOX' AND id IN (${ph(ids)})`).all(uid, ...ids);
   const done = new Set();
   const senders = [...new Set(rows.map((r) => String(r.from_addr || '').toLowerCase()).filter(Boolean))];
   for (const a of senders) {
@@ -129,7 +129,7 @@ export function counts(uid) {
   const now = Date.now();
   const c = (cat) => db.prepare('SELECT COUNT(*) n, COALESCE(SUM(unread),0) u FROM messages WHERE user_id=? AND cat=?').get(uid, cat);
   return {
-    offers: c('offers').n, offers_unread: c('offers').u, spam: c('spam').n, trash: c('trash').n,
+    offers: c('offers').n, offers_unread: c('offers').u, spam: c('spam').n, trash: c('trash').n, sent: c('sent').n, drafts: c('drafts').n,
     snoozed: db.prepare("SELECT COUNT(*) n FROM messages WHERE user_id=? AND cat='inbox' AND snoozed_until>?").get(uid, now).n,
   };
 }

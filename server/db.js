@@ -68,6 +68,16 @@ const MIGRATIONS = [
      id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      code_hash TEXT NOT NULL UNIQUE, note TEXT, created_at INTEGER NOT NULL, expires INTEGER NOT NULL,
      used_by INTEGER, used_at INTEGER);`,
+  `ALTER TABLE messages ADD COLUMN att_try INTEGER NOT NULL DEFAULT 0;
+   CREATE TABLE attachments(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+     idx INTEGER NOT NULL, filename TEXT, ctype TEXT, size INTEGER NOT NULL DEFAULT 0, cid TEXT, inline INTEGER NOT NULL DEFAULT 0, data BLOB,
+     UNIQUE(message_id, idx));
+   CREATE INDEX att_msg ON attachments(message_id);
+   CREATE TABLE folder_state(
+     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, folder TEXT NOT NULL, path TEXT, last_uid INTEGER NOT NULL DEFAULT 0, synced_at INTEGER,
+     PRIMARY KEY(account_id, folder));`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

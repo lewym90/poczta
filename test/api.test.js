@@ -308,3 +308,67 @@ test('uzupełnianie HTML w tle: wiadomości bez oryginału dostają go przed otw
   assert.equal(zlib.inflateSync(rows[0].html_z).toString(), '<p>oryginał</p>'); assert.equal(rows[1].html_z, null); assert.equal(rows[1].html_try, 2);
   await backfillHtml(a.id); assert.equal(calls, 1); // nic więcej do pobrania
 });
+
+test('załączniki: lista w wiadomości, pobranie, podgląd PDF, cudze/nieistniejące odrzucone, cid w HTML', async () => {
+  const { db } = await import('../server/db.js');
+  const { storeMessages } = await import('../server/sync.js');
+  const l = (await api('GET', '/api/messages?tab=all')).body.messages;
+  const inv = l.find((m) => /Faktura/.test(m.subject)); assert.ok(inv && inv.has_attach);
+  const d = (await api('GET', `/api/messages/${inv.id}`)).body.message;
+  assert.equal(d.attachments.length, 1); assert.equal(d.attachments[0].filename, 'FV-10-2026.pdf');
+  const dl = await fetch(`${base}/api/messages/${inv.id}/att/0`, { headers: { cookie } });
+  assert.equal(dl.status, 200); assert.match(dl.headers.get('content-disposition'), /^attachment/); assert.equal(dl.headers.get('content-type'), 'application/octet-stream');
+  assert.ok((await dl.text()).startsWith('%PDF'));
+  const vw = await fetch(`${base}/api/messages/${inv.id}/att/0?view=1`, { headers: { cookie } });
+  assert.match(vw.headers.get('content-disposition'), /^inline/); assert.equal(vw.headers.get('content-type'), 'application/pdf');
+  assert.equal((await api('GET', `/api/messages/${inv.id}/att/5`)).status, 404);
+  const acc = db.prepare('SELECT id,user_id FROM accounts WHERE user_id=(SELECT id FROM users ORDER BY id LIMIT 1) LIMIT 1').get();
+  storeMessages(acc, [{ uid: 9001, messageId: '<cid1>', fromName: 'Sklep', fromAddr: 'a@sklep.example', toAddr: '', subject: 'cid test', body: 'x', snippet: 'x', date: Date.now(), unread: true, hasAttach: false, ics: [], unsub: false, bulk: false,
+    html: '<p>Logo: <img src="cid:logo@x" width="50" height="50"></p>', atts: [{ idx: 0, filename: 'logo.png', ctype: 'image/png', size: 4, cid: 'logo@x', inline: true, data: Buffer.from([1, 2, 3, 4]) }] }]);
+  const id = db.prepare("SELECT id FROM messages WHERE uid=9001").get().id;
+  const m2 = (await api('GET', `/api/messages/${id}`)).body.message;
+  assert.equal(m2.attachments.length, 0); assert.match(m2.frame, new RegExp(`api/messages/${id}/att/0\\?view=1`));
+  const img = await fetch(`${base}/api/messages/${id}/att/0?view=1`, { headers: { cookie } }); assert.equal(img.headers.get('content-type'), 'image/png');
+});
+
+test('Wysłane i Szkice: synchronizacja folderów, własne zakładki, poza skrzynką/szukaniem spamu, kosz świadomy folderu, szkice znikają po usunięciu u dostawcy', async () => {
+  const { db } = await import('../server/db.js');
+  const { syncFolders } = await import('../server/sync.js');
+  const { imap } = await import('../server/providers/imap.js');
+  const { flushTrash } = await import('../server/jobs.js');
+  const uid = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get().id;
+  const acc = db.prepare("INSERT INTO accounts(user_id,label,provider,email,config,created_at) VALUES(?,?,?,?,?,?)").run(uid, 'fs', 'imap', 'fs@example.com', '{"imap":{}}', Date.now());
+  const aid = Number(acc.lastInsertRowid);
+  const mk = (u, subj) => ({ uid: u, messageId: `<fs${u}>`, fromName: 'Ja', fromAddr: 'fs@example.com', toAddr: 'ktos@example.org', subject: subj, body: 'treść ' + subj, snippet: 'x', date: Date.now() - u, unread: false, hasAttach: false, atts: [], ics: [], html: '' });
+  let drafts = [mk(11, 'szkic jeden'), mk(12, 'szkic dwa')];
+  imap.listSpecial = async () => ({ sent: '[Gmail]/Sent Mail', drafts: '[Gmail]/Drafts' });
+  imap.sync = async (c, p, o) => (o.path === '[Gmail]/Drafts' ? { messages: drafts, lastUid: 0 } : { messages: [mk(5, 'wysłany jeden')], lastUid: 5 });
+  assert.equal(await syncFolders(aid, { force: true }), 3);
+  const sent = (await api('GET', '/api/messages?tab=sent')).body.messages; assert.ok(sent.some((m) => m.subject === 'wysłany jeden' && m.to_addr === 'ktos@example.org' && m.cat === 'sent'));
+  assert.equal((await api('GET', '/api/messages?tab=drafts')).body.messages.filter((m) => m.account_id === aid).length, 2);
+  assert.ok(!(await api('GET', '/api/messages?tab=all')).body.messages.some((m) => m.subject === 'wysłany jeden'));
+  assert.equal((await api('GET', '/api/messages?tab=all')).body.unread >= 0, true);
+  drafts = [mk(12, 'szkic dwa')]; await syncFolders(aid, { force: true });
+  assert.deepEqual((await api('GET', '/api/messages?tab=drafts')).body.messages.filter((m) => m.account_id === aid).map((m) => m.subject), ['szkic dwa']);
+  const id = sent.find((m) => m.subject === 'wysłany jeden').id;
+  assert.equal((await api('POST', '/api/messages/act', { ids: [id], action: 'spam' })).status, 200); // reguły nie dotyczą własnych wiadomości
+  assert.equal(db.prepare('SELECT cat FROM messages WHERE id=?').get(id).cat, 'sent');
+  assert.equal((await api('POST', '/api/messages/act', { ids: [id], action: 'delete' })).status, 200);
+  const calls = []; await flushTrash(async (a, u, f) => { calls.push([a, u, f]); }, Date.now() + 60e3);
+  assert.ok(calls.some(([a, u, f]) => a === aid && f === 'SENT' && u.length === 1));
+  await api('POST', '/api/messages/act', { ids: [id], action: 'restore' }); assert.equal(db.prepare('SELECT cat FROM messages WHERE id=?').get(id).cat, 'sent');
+});
+
+test('starsze wiadomości: /api/history dociąga porcję sprzed najstarszej, bez powiadomień, a lista stronicuje przez before', async () => {
+  const { db } = await import('../server/db.js');
+  const { imap } = await import('../server/providers/imap.js');
+  const uid = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get().id;
+  const acc = db.prepare("INSERT INTO accounts(user_id,label,provider,email,config,created_at) VALUES(?,?,?,?,?,?)").run(uid, 'hist', 'imap', 'hist@example.com', '{"imap":{}}', Date.now());
+  const aid = Number(acc.lastInsertRowid);
+  db.prepare("INSERT INTO messages(user_id,account_id,folder,uid,subject,from_addr,body,date,unread,created_at) VALUES(?,?,'INBOX',500,'najnowszy','a@b.pl','x',?,0,?)").run(uid, aid, Date.now() - 1e9, Date.now());
+  let asked = 0;
+  imap.history = async (c, p, o) => { asked = o.beforeUid; return { messages: [{ uid: 400, messageId: '<h400>', fromName: 'Stary', fromAddr: 'stary@example.org', toAddr: '', subject: 'stara wiadomość', body: 'dawno temu', snippet: 'dawno', date: Date.now() - 2e9, unread: false, hasAttach: false, atts: [], ics: [], html: '', unsub: false, bulk: false }], left: 3 }; };
+  const r = await api('POST', '/api/history', { account_id: aid });
+  assert.equal(r.status, 200); assert.equal(r.body.added, 1); assert.equal(r.body.left, 3); assert.equal(asked, 500);
+  const page = (await api('GET', `/api/messages?tab=all&account=${aid}&before=${Date.now() - 1.5e9}`)).body.messages; assert.deepEqual(page.map((m) => m.subject), ['stara wiadomość']);
+});

@@ -21,12 +21,13 @@ export function cleanCss(css, imgUrl) {
 }
 
 // opts.images: czy ładować obrazki zdalne (przez proxy). Zwraca { html, remote } albo null, gdy HTML jest pusty lub zbyt duży.
-export function cleanHtml(raw, { images = true, proxy = 'api/img?u=' } = {}) {
+export function cleanHtml(raw, { images = true, proxy = 'api/img?u=', cid = null } = {}) {
   const src = String(raw || '');
   if (!src.trim() || src.length > 3e6) return null;
   let remote = 0;
   const imgUrl = (u) => {
     if (/^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(u)) return u.length < MAX_DATA ? u : null;
+    if (cid && /^cid:/i.test(u)) return cid(u.slice(4).trim().replace(/^<|>$/g, ''));
     if (!/^https?:\/\//i.test(u)) return null;
     remote++;
     return images ? proxy + encodeURIComponent(u) : null;

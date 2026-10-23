@@ -72,3 +72,9 @@ Właściciel: **Skrzynki → Osoby → Zaproś osobę**. Powstaje jednorazowy li
 dodaje własną skrzynkę i ma własne powiadomienia, reguły i dane. Właściciel nie widzi jej poczty. Limity (zmienne w `/etc/poczta.env`):
 `POCZTA_MAX_GUESTS` (domyślnie 3 osoby) i `POCZTA_GUEST_ACCOUNTS` (domyślnie 3 skrzynki na osobę). Usunięcie osoby kasuje jej dane.
 Uwaga: administrator serwera technicznie ma dostęp do bazy i klucza szyfrującego, więc zaproszone osoby powinny o tym wiedzieć.
+
+## Załączniki, Wysłane, Szkice, starsza poczta
+
+- **Załączniki**: lista pod nagłówkiem wiadomości; obrazy i PDF otwierają się w podglądzie, reszta pobiera się jako plik. Treść pobierana jest z serwera poczty na żądanie (limit 40 MB), małe obrazki inline (`cid:`) są zapisane i widać je w oryginale maila.
+- **Wysłane i Szkice**: osobne zakładki, synchronizowane co najwyżej co 90 s. Szkic otwiera się do edycji i wysyłki. Usunięcie wiadomości z tych folderów przenosi ją do kosza u dostawcy z właściwego folderu.
+- **Starsza poczta**: przycisk „Wczytaj starsze” najpierw stronicuje to, co jest lokalnie, a potem dociąga kolejne 60 wiadomości z serwera poczty.

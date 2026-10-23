@@ -79,15 +79,15 @@ export function runDigests(now = new Date()) {
 const GRACE = 12000, KEEP_DAYS = 30;
 export function serverDeleteOn(uid) { return (db.prepare("SELECT value FROM flags WHERE user_id=? AND key='server_delete'").get(uid)?.value ?? '1') === '1'; }
 export async function flushTrash(trash, now = Date.now()) {
-  const rows = db.prepare("SELECT id,user_id,account_id,uid FROM messages WHERE cat IN ('trash','blocked') AND server_done=0 AND deleted_at<=?").all(now - GRACE);
+  const rows = db.prepare("SELECT id,user_id,account_id,uid,folder FROM messages WHERE cat IN ('trash','blocked') AND server_done=0 AND deleted_at<=?").all(now - GRACE);
   const by = new Map();
-  for (const r of rows) { const k = `${r.user_id}:${r.account_id}`; if (!by.has(k)) by.set(k, []); by.get(k).push(r); }
+  for (const r of rows) { const k = `${r.user_id}:${r.account_id}:${r.folder}`; if (!by.has(k)) by.set(k, []); by.get(k).push(r); }
   let n = 0;
   for (const list of by.values()) {
     if (!serverDeleteOn(list[0].user_id)) { for (const r of list) db.prepare('UPDATE messages SET server_done=2 WHERE id=?').run(r.id); continue; }
     for (let i = 0; i < list.length; i += 100) {
       const chunk = list.slice(i, i + 100);
-      try { await trash(list[0].account_id, chunk.map((r) => r.uid)); for (const r of chunk) db.prepare('UPDATE messages SET server_done=1 WHERE id=?').run(r.id); n += chunk.length; }
+      try { await trash(list[0].account_id, chunk.map((r) => r.uid), list[0].folder); for (const r of chunk) db.prepare('UPDATE messages SET server_done=1 WHERE id=?').run(r.id); n += chunk.length; }
       catch (e) {
         for (const r of chunk) db.prepare('UPDATE messages SET server_try=server_try+1, server_done=CASE WHEN server_try>=2 THEN 2 ELSE 0 END WHERE id=?').run(r.id);
         db.prepare('INSERT INTO audit(user_id,ts,action,detail) VALUES(?,?,?,?)').run(list[0].user_id, Date.now(), 'server_trash_error', String(e.message || e).slice(0, 200));

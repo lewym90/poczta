@@ -3,6 +3,9 @@ const day = (n, h = 9, m = 0) => { const d = new Date(); d.setDate(d.getDate() +
 const dm = (d) => `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
 const hm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
+// minimalny, poprawny PDF jednej strony do prób pobierania załączników
+const DEMO_PDF = Buffer.from('%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 120]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 52>>stream\nBT /F1 18 Tf 20 60 Td (Faktura FV/10/2026) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R/Size 6>>\n%%EOF\n');
+
 export const demo = {
   id: 'demo',
   async test() {},
@@ -30,7 +33,7 @@ export const demo = {
         html: '<html><head><style>.hero{background:linear-gradient(135deg,#0b3d2e,#0b1220);color:#fff;padding:28px 24px}.btn{display:inline-block;border:1px solid #fff;border-radius:22px;padding:10px 22px;color:#fff;text-decoration:none}</style></head><body style="margin:0;background:#f4f4f4"><table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center"><table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%"><tr><td class="hero"><div style="color:#e50914;font-weight:800;font-size:22px">N</div><h1 style="font-size:32px;line-height:38px;margin:18px 0 8px">Czeka na Ciebie kolejny tytuł</h1><p style="opacity:.8;margin:0 0 18px">Odkryj spersonalizowaną listę filmów, seriali i programów, których nie możesz przegapić.</p><a class="btn" href="https://netflix.example/browse">Przeglądaj wszystko</a></td></tr><tr><td style="background:#fff;padding:20px 24px;color:#333">Wybrane dla: Michał<br><div style="width:200px;height:80px;margin-top:8px;border-radius:8px;background:linear-gradient(135deg,#b5171e,#4a0b10)"></div></td></tr></table></td></tr></table></body></html>' },
       { uid: 8, fromName: 'Szybkie Pożyczki', fromAddr: 'kontakt@pozyczki-online.example', subject: 'Pożyczka bez BIK od ręki, gratulujemy wygranej!', date: ago(5), unread: true,
         body: 'Gratulujemy wygranej! Pożyczka bez BIK czeka na Ciebie, zainwestuj i zarabiaj z domu dziennie. Kliknij tutaj.' },
-    ].map((m) => ({ ...m, messageId: `<demo-${m.uid}@poczta.local>`, toAddr: 'ty@example.com', snippet: m.body.replace(/\s+/g, ' ').slice(0, 160), hasAttach: m.uid === 3, ics: [] }));
+    ].map((m) => ({ ...m, messageId: `<demo-${m.uid}@poczta.local>`, toAddr: 'ty@example.com', snippet: m.body.replace(/\s+/g, ' ').slice(0, 160), hasAttach: m.uid === 3, atts: m.uid === 3 ? [{ idx: 0, filename: 'FV-10-2026.pdf', ctype: 'application/pdf', size: DEMO_PDF.length, cid: null, inline: false, data: DEMO_PDF }] : [], ics: [] }));
     return { messages, lastUid: 9 };
   },
   async setSeen() {},

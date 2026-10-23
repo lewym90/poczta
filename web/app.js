@@ -278,7 +278,8 @@ function mountFrame(doc) {
     const key = `${w}x${h}x${de.style.zoom}`; if (key === last) return; last = key; f.style.height = h + 'px';
   };
   const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
-  f.onload = () => { fit(); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
+  const reveal = () => { if (!f.isConnected) return; fit(); $('#body')?.classList.remove('pend'); $('#ptext')?.remove(); $('#ldg')?.remove(); };
+  f.onload = () => { fit(); const imgs = [...f.contentDocument.images].filter((i) => !i.complete); Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 2500))]).then(reveal); try { new ResizeObserver(later).observe(f.contentDocument.body); } catch { /* starsze przeglądarki */ } f.contentDocument.addEventListener('load', later, true); setTimeout(fit, 600); setTimeout(fit, 2000); };
   f.srcdoc = doc;
   window.addEventListener('resize', later, { passive: true });
 }
@@ -289,7 +290,8 @@ async function viewMessage(id) {
   const risky = m.risk >= 2;
   const framed = !!m.frame, html = framed && (cacheGet('mode') || 'html') !== 'text';
   const d = new Date(m.date);
-  const linkify = (t) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
+  const clean = (t) => String(t || '').replace(/^[ \t]*\[https?:\/\/[^\]\s]+\][ \t]*$/gm, '').replace(/\[(https?:\/\/[^\]\s]+)\]/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+  const linkify = (t) => esc(clean(t)).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
   paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button><span style="display:flex;gap:8px"><button class="round gl" data-org="${m.id}" aria-label="Porządkowanie: usuń, spam, zablokuj">${ic('more')}</button><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span></div>
     <h1 class="subject">${esc(m.subject)}</h1>
     <div class="meta"><div class="a ${hue(m.from_addr)}">${esc(initials(m.from_name))}</div><div class="w"><div class="n">${esc(m.from_name || m.from_addr)}</div><div class="d mono">${esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div></div>
@@ -298,10 +300,13 @@ async function viewMessage(id) {
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
     ${framed ? `<div class="mseg gl" role="group" aria-label="Widok wiadomości"><button data-mode="html" aria-pressed="${html}">Oryginał</button><button data-mode="text" aria-pressed="${!html}">Tekst</button></div>` : ''}
     ${html && m.images_blocked ? `<div class="fbanner gl"><div>Obrazki są wyłączone.</div><button class="btn" data-act="showimg" data-id="${m.id}">Pokaż obrazki</button></div>` : ''}
-    ${html ? `<div class="mailwrap ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div>`
+    ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${linkify(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
       : `<div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`}`, { tabs: false });
   S.cur = { m, items };
   if (html) mountFrame(m.frame);
+  else if (m.html_pending && (cacheGet('mode') || 'html') !== 'text') {
+    let n = 0; const again = async () => { if (!location.hash.endsWith(`/m/${id}`) || n++ > 4) return; try { const r = await get(`/api/messages/${id}`); if (r.message.frame) return viewMessage(id); } catch {} setTimeout(again, 2500); }; setTimeout(again, 2000);
+  }
 }
 
 async function viewToday() {

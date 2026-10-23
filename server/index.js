@@ -213,19 +213,21 @@ route('GET', '/api/messages/:id', async (ctx) => {
   const m = db.prepare('SELECT m.*,a.email AS account_email,a.label AS account_label,a.provider AS account_provider FROM messages m JOIN accounts a ON a.id=m.account_id WHERE m.id=? AND m.user_id=?').get(+ctx.params.id, ctx.user.id) || bad('Nie ma takiej wiadomości', 404);
   const items = db.prepare("SELECT * FROM found_items WHERE message_id=? AND user_id=? AND status!='dismissed' ORDER BY starts_at").all(m.id, ctx.user.id).map((i) => ({ ...i, link: calendarLink(i) }));
   // oryginalny HTML: zapisany przy pobraniu, a dla starszych wiadomości dociągany raz z serwera poczty
-  let rawHtml = m.html_z ? zlib.inflateSync(m.html_z).toString('utf8') : '';
-  if (!rawHtml && !m.html_try && m.account_provider === 'imap') {
-    db.prepare('UPDATE messages SET html_try=1 WHERE id=?').run(m.id);
-    const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
-    try {
-      rawHtml = await Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 15000))]);
-      if (rawHtml) db.prepare('UPDATE messages SET html_z=? WHERE id=?').run(zlib.deflateSync(Buffer.from(rawHtml)), m.id);
-    } catch { rawHtml = ''; }
+  let rawHtml = m.html_z ? zlib.inflateSync(m.html_z).toString('utf8') : '', pending = false;
+  if (!rawHtml && m.account_provider === 'imap') {
+    if (!m.html_try) { // dociąganie w tle: otwarcie wiadomości nie czeka na serwer poczty
+      db.prepare('UPDATE messages SET html_try=1 WHERE id=?').run(m.id);
+      const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(m.account_id);
+      Promise.race([providers.imap.fetchHtml({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), m.uid), new Promise((_, rej) => setTimeout(() => rej(new Error('czas')), 20000))])
+        .then((h) => { if (h) db.prepare('UPDATE messages SET html_z=? WHERE id=?').run(zlib.deflateSync(Buffer.from(h)), m.id); else db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id); })
+        .catch(() => db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(m.id));
+      pending = true;
+    } else if (m.html_try === 1) pending = true;
   }
   const pref = imagesOn(ctx.user.id), images = pref || ctx.query.get('images') === '1';
   const cleaned = rawHtml ? cleanHtml(rawHtml, { images }) : null;
   return { message: { id: m.id, account_id: m.account_id, account_email: m.account_email, account_label: m.account_label, from_name: m.from_name, from_addr: m.from_addr, to_addr: m.to_addr, subject: m.subject, body: m.body, date: m.date, unread: !!m.unread, risk: m.risk, risk_reasons: m.risk_reasons ? JSON.parse(m.risk_reasons) : [], has_attach: !!m.has_attach, message_id: m.message_id, snoozed_until: m.snoozed_until, cat: m.cat, cat_why: m.cat_why,
-    frame: cleaned ? frameDoc(cleaned.html) : null, remote_images: cleaned ? cleaned.remote : 0, images_blocked: !!(cleaned && cleaned.remote && !images) }, items };
+    frame: cleaned ? frameDoc(cleaned.html) : null, html_pending: pending && !cleaned, remote_images: cleaned ? cleaned.remote : 0, images_blocked: !!(cleaned && cleaned.remote && !images) }, items };
 });
 route('GET', '/api/img', async (ctx) => {
   if (!rateLimit(`img:${ctx.user.id}`, 900, 300e3)) bad('Za dużo obrazków naraz', 429);

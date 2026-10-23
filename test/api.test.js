@@ -269,3 +269,23 @@ test('proxy obrazków: wymaga logowania i nie łączy się z siecią prywatną',
   assert.equal((await api('GET', '/api/img?u=' + encodeURIComponent('http://169.254.169.254/latest/meta-data'))).status, 502);
   assert.equal((await api('GET', '/api/img?u=' + encodeURIComponent('ftp://example.com/a.png'))).status, 400);
 });
+
+test('zaproszenia: właściciel zaprasza, gość zakłada konto, dane są rozdzielone, gość nie zaprasza, usunięcie sprząta', async () => {
+  const ownerCookie = cookie;
+  const inv = await api('POST', '/api/invites', {}); assert.equal(inv.status, 200); assert.ok(inv.body.code.length >= 16);
+  cookie = '';
+  assert.equal((await api('POST', '/api/join', { code: 'zly', email: 'ona@example.com', password: 'dlugie-haslo-12345' })).status, 403);
+  assert.equal((await api('POST', '/api/join', { code: inv.body.code, email: 'ona@example.com', password: 'krotkie' })).status, 400);
+  const j = await api('POST', '/api/join', { code: inv.body.code, email: 'ona@example.com', password: 'dlugie-haslo-12345' });
+  assert.equal(j.status, 200); assert.equal(j.body.user.plan, 'guest');
+  assert.equal((await api('POST', '/api/join', { code: inv.body.code, email: 'inna@example.com', password: 'dlugie-haslo-12345' })).status, 403); // jednorazowe
+  assert.equal((await api('GET', '/api/messages')).body.messages?.length ?? 0, 0); // nie widzi poczty właściciela
+  assert.equal((await api('POST', '/api/invites', {})).status, 403);
+  assert.equal((await api('GET', '/api/people')).status, 403);
+  cookie = ownerCookie;
+  const p = await api('GET', '/api/people'); const guest = p.body.users.find((u) => u.plan === 'guest');
+  const before = p.body.users.length;
+  assert.ok(guest); assert.equal((await api('DELETE', `/api/people/${guest.id}`)).status, 200);
+  assert.equal((await api('GET', '/api/people')).body.users.length, before - 1);
+  assert.equal((await api('DELETE', `/api/people/${p.body.users.find((u) => u.plan === 'owner').id}`)).status, 400); // właściciela nie usuniesz
+});

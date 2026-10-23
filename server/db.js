@@ -64,6 +64,10 @@ const MIGRATIONS = [
      UNIQUE(user_id, kind, value));`,
   `ALTER TABLE messages ADD COLUMN html_z BLOB;
    ALTER TABLE messages ADD COLUMN html_try INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE invites(
+     id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     code_hash TEXT NOT NULL UNIQUE, note TEXT, created_at INTEGER NOT NULL, expires INTEGER NOT NULL,
+     used_by INTEGER, used_at INTEGER);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

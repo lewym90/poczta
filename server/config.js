@@ -16,7 +16,9 @@ export const config = {
   webDir: path.join(root, 'web'),
   kalendarzUrl: (env.KALENDARZ_URL || 'https://lewym90.github.io/kalendarz/').replace(/\/?$/, '/'),
   // Tenant-ready: ile kont użytkowników można założyć. 1 = tylko właściciel (domyślnie).
-  maxUsers: parseInt(env.POCZTA_MAX_USERS || '1', 10),
+  maxUsers: parseInt(env.POCZTA_MAX_USERS || '1', 10), // dotyczy tylko instalacji pierwszego konta właściciela
+  maxGuests: parseInt(env.POCZTA_MAX_GUESTS || '3', 10), // ile osób właściciel może zaprosić
+  guestMaxAccounts: parseInt(env.POCZTA_GUEST_ACCOUNTS || '3', 10),
   syncEverySec: parseInt(env.POCZTA_SYNC_SEC || '120', 10),
   secureCookie: env.POCZTA_SECURE_COOKIE !== '0' && env.NODE_ENV === 'production',
   demoAllowed: env.POCZTA_DEMO !== '0',

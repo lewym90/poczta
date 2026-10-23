@@ -12,6 +12,7 @@ import { serverDeleteOn } from './jobs.js';
 import zlib from 'node:zlib';
 import { cleanHtml, frameDoc } from './intel/mailhtml.js';
 import { fetchImage } from './imgproxy.js';
+import crypto from 'node:crypto';
 import { vapidPublicKey, sendToUser, getPrefs, setPrefs } from './push.js';
 import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
@@ -77,10 +78,10 @@ route('POST', '/api/setup', async (ctx) => {
   return login(ctx, Number(r.lastInsertRowid), email.toLowerCase());
 }, { auth: false });
 
-function login(ctx, id, email) {
+function login(ctx, id, email, plan = 'owner') {
   const token = createSession(id, ctx.req.headers['user-agent']);
   ctx.headers['Set-Cookie'] = sessionCookie(token, 60 * 86400);
-  return { user: { id, email } };
+  return { user: { id, email, plan } };
 }
 route('POST', '/api/login', async (ctx) => {
   if (!rateLimit(`login:${ctx.ip}`, 8)) bad('Za dużo prób. Spróbuj za kilka minut.', 429);
@@ -88,7 +89,48 @@ route('POST', '/api/login', async (ctx) => {
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').toLowerCase());
   if (!u || !verifyPassword(String(password || ''), u.pass_hash)) { audit(u?.id, 'login_failed', ctx.ip); bad('Niepoprawny e-mail lub hasło', 401); }
   audit(u.id, 'login', ctx.ip);
-  return login(ctx, u.id, u.email);
+  return login(ctx, u.id, u.email, u.plan);
+}, { auth: false });
+// zaproszenia: właściciel zaprasza osoby; każda ma własne konto, własne skrzynki i własne dane (user_id w każdej tabeli)
+const sha = (x) => crypto.createHash('sha256').update(String(x)).digest('hex');
+const owner = (ctx) => { if (ctx.user.plan !== 'owner') bad('Tylko właściciel może zapraszać', 403); };
+route('GET', '/api/people', (ctx) => {
+  owner(ctx);
+  const now = Date.now();
+  const users = db.prepare("SELECT u.id,u.email,u.plan,u.created_at,(SELECT COUNT(*) FROM accounts a WHERE a.user_id=u.id) AS accounts,(SELECT MAX(ts) FROM audit WHERE user_id=u.id AND action='login') AS last_login FROM users u ORDER BY u.id").all();
+  const invites = db.prepare('SELECT id,note,created_at,expires FROM invites WHERE used_by IS NULL AND expires>? ORDER BY id DESC').all(now);
+  return { users, invites, guests: users.filter((u) => u.plan !== 'owner').length, maxGuests: config.maxGuests };
+});
+route('POST', '/api/invites', (ctx) => {
+  owner(ctx);
+  const now = Date.now();
+  const guests = db.prepare("SELECT COUNT(*) n FROM users WHERE plan!='owner'").get().n, open = db.prepare('SELECT COUNT(*) n FROM invites WHERE used_by IS NULL AND expires>?').get(now).n;
+  if (guests + open >= config.maxGuests) bad(`Limit osób na tym serwerze: ${config.maxGuests}. Usuń kogoś lub unieważnij zaproszenie.`);
+  const code = crypto.randomBytes(12).toString('base64url');
+  db.prepare('INSERT INTO invites(user_id,code_hash,note,created_at,expires) VALUES(?,?,?,?,?)').run(ctx.user.id, sha(code), String(ctx.body.note || '').slice(0, 60), now, now + 7 * 86400e3);
+  audit(ctx.user.id, 'invite_created'); return { code, expires: now + 7 * 86400e3 };
+});
+route('DELETE', '/api/invites/:id', (ctx) => { owner(ctx); db.prepare('DELETE FROM invites WHERE id=? AND used_by IS NULL').run(+ctx.params.id); return { ok: true }; });
+route('DELETE', '/api/people/:id', (ctx) => {
+  owner(ctx);
+  const u = db.prepare('SELECT id,email,plan FROM users WHERE id=?').get(+ctx.params.id) || bad('Nie ma takiej osoby', 404);
+  if (u.plan === 'owner' || u.id === ctx.user.id) bad('Właściciela nie można usunąć', 400);
+  for (const a of db.prepare('SELECT id FROM accounts WHERE user_id=?').all(u.id)) unwatchAccount(a.id);
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  db.exec('DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages)');
+  audit(ctx.user.id, 'user_removed', u.email); return { ok: true };
+});
+route('POST', '/api/join', async (ctx) => {
+  if (!rateLimit(`join:${ctx.ip}`, 8)) bad('Za dużo prób. Spróbuj za kilka minut.', 429);
+  const { code, email, password } = ctx.body;
+  const inv = db.prepare('SELECT * FROM invites WHERE code_hash=? AND used_by IS NULL AND expires>?').get(sha(code || ''), Date.now()) || bad('Zaproszenie jest nieprawidłowe lub wygasło', 403);
+  if (!isEmail(email)) bad('Podaj poprawny adres e-mail');
+  if (typeof password !== 'string' || password.length < 10) bad('Hasło musi mieć co najmniej 10 znaków');
+  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email.toLowerCase())) bad('Ten adres ma już konto w Poczcie', 409);
+  const r = db.prepare("INSERT INTO users(email,pass_hash,plan,created_at) VALUES(?,?,'guest',?)").run(email.toLowerCase(), hashPassword(password), Date.now());
+  const id = Number(r.lastInsertRowid);
+  db.prepare('UPDATE invites SET used_by=?, used_at=? WHERE id=?').run(id, Date.now(), inv.id);
+  audit(id, 'user_joined', email); return login(ctx, id, email.toLowerCase(), 'guest');
 }, { auth: false });
 route('POST', '/api/logout', (ctx) => { destroySession(ctx.token); ctx.headers['Set-Cookie'] = sessionCookie('', 0); return { ok: true }; });
 
@@ -114,7 +156,7 @@ route('POST', '/api/accounts', async (ctx) => {
     imap: { host: imapHost, port: num(ctx.body.imapPort, p?.imap[1] || 993), secure: ctx.body.imapSecure ?? p?.imap[2] ?? true },
     smtp: smtpHost ? { host: smtpHost, port: num(ctx.body.smtpPort, p?.smtp[1] || 465), secure: ctx.body.smtpSecure ?? p?.smtp[2] ?? true } : null,
   };
-  if (db.prepare('SELECT COUNT(*) n FROM accounts WHERE user_id=?').get(ctx.user.id).n >= 10) bad('Limit 10 kont');
+  if (db.prepare('SELECT COUNT(*) n FROM accounts WHERE user_id=?').get(ctx.user.id).n >= (ctx.user.plan === 'owner' ? 10 : config.guestMaxAccounts)) bad(`Limit kont: ${ctx.user.plan === 'owner' ? 10 : config.guestMaxAccounts}`);
   try { await providers.imap.test({ ...cfg, email }, password); }
   catch (e) { bad(`Nie udało się zalogować: ${String(e.responseText || e.message).slice(0, 160)}`, 422); }
   const r = db.prepare('INSERT INTO accounts(user_id,label,provider,email,config,secret_enc,created_at) VALUES(?,?,?,?,?,?,?)')

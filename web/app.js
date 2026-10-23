@@ -338,17 +338,17 @@ async function viewAccounts() {
     <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Porządek w poczcie</div><div id="orgcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
-    <div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
-  nav('accounts'); renderPushCard(); renderOrgCard();
+    ${S.user.plan === 'owner' ? '<div class="sec">Osoby</div><div id="peoplecard" class="card gl" style="margin-top:6px"></div>' : ''}<div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
+  nav('accounts'); renderPushCard(); renderOrgCard(); renderPeople();
 }
 
 function viewAuth() {
-  const setup = S.setupNeeded;
-  paint(`<div class="auth"><h1 class="ser">${setup ? 'Witaj w <i>Poczcie</i>' : 'Poczta'}</h1><p style="color:var(--ink2);margin:0 0 18px;font-size:16px;line-height:23px">${setup ? 'Załóż konto właściciela. To hasło chroni dostęp do Twojej poczty.' : 'Zaloguj się, aby wejść do skrzynki.'}</p>
-  <form id="auth" class="gl" style="border-radius:28px;padding:8px 18px 18px"><div class="fld"><label for="e">E-mail</label><input class="in" id="e" type="email" autocomplete="username" required autocapitalize="off"></div><div class="fld"><label for="p">Hasło${setup ? ' (min. 10 znaków)' : ''}</label><input class="in" id="p" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required minlength="${setup ? 10 : 1}"></div>${setup ? '<div class="fld"><label for="c">Kod instalacji</label><input class="in" id="c" autocomplete="off" placeholder="z instalatora serwera"></div>' : ''}<div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${setup ? 'Utwórz konto' : 'Zaloguj'}</button></form></div>`, { tabs: false });
+  const jm = location.hash.match(/^#\/join\/([\w-]+)/), join = jm && jm[1], setup = !join && S.setupNeeded;
+  paint(`<div class="auth"><h1 class="ser">${setup || join ? 'Witaj w <i>Poczcie</i>' : 'Poczta'}</h1><p style="color:var(--ink2);margin:0 0 18px;font-size:16px;line-height:23px">${join ? 'Dostałaś zaproszenie. Załóż własne konto: Twoja poczta będzie widoczna tylko dla Ciebie.' : setup ? 'Załóż konto właściciela. To hasło chroni dostęp do Twojej poczty.' : 'Zaloguj się, aby wejść do skrzynki.'}</p>
+  <form id="auth" class="gl" style="border-radius:28px;padding:8px 18px 18px"><div class="fld"><label for="e">E-mail</label><input class="in" id="e" type="email" autocomplete="username" required autocapitalize="off"></div><div class="fld"><label for="p">Hasło${setup || join ? ' (min. 10 znaków)' : ''}</label><input class="in" id="p" type="password" autocomplete="${setup || join ? 'new-password' : 'current-password'}" required minlength="${setup || join ? 10 : 1}"></div>${setup ? '<div class="fld"><label for="c">Kod instalacji</label><input class="in" id="c" autocomplete="off" placeholder="z instalatora serwera"></div>' : ''}<div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${setup || join ? 'Utwórz konto' : 'Zaloguj'}</button></form>${join ? '<p style="color:var(--ink2);font-size:13px;line-height:19px;margin:14px 6px 0">To hasło dotyczy tylko Poczty, nie Twojej skrzynki. Skrzynkę dodasz za chwilę.</p>' : ''}</div>`, { tabs: false });
   $('#auth').onsubmit = async (ev) => {
     ev.preventDefault(); const b = ev.submitter; b.disabled = true;
-    try { const r = await post(setup ? '/api/setup' : '/api/login', { email: $('#e').value, password: $('#p').value, code: $('#c')?.value }); S.user = r.user; S.animate = true; go('#/'); }
+    try { const r = await post(join ? '/api/join' : setup ? '/api/setup' : '/api/login', { email: $('#e').value, password: $('#p').value, code: join || $('#c')?.value }); S.user = r.user; S.animate = true; go('#/'); }
     catch (e) { $('#err').textContent = e.message; b.disabled = false; }
   };
 }
@@ -367,6 +367,18 @@ async function renderOrgCard() {
     <div class="actions"><button class="btn grow" data-act="resort">${ic('refresh', 'i18')}Posortuj ponownie</button></div>
     ${r.rules.length ? `<div class="sec" style="margin-top:14px">Zapamiętani nadawcy</div>${r.rules.map((x) => `<div class="rule"><span class="rb ${x.action}">${RULE_LABEL[x.action]}</span><span class="rv">${x.kind === 'domain' ? '@' : ''}${esc(x.value)}</span><button class="round gl" style="width:36px;height:36px" data-rmrule="${x.id}" aria-label="Usuń regułę">${ic('x', 'i14')}</button></div>`).join('')}` : ''}`;
   S.srvdel = r.serverDelete; S.imgs = r.images;
+}
+
+// ---- osoby: zaproszenia (tylko właściciel) ----
+async function renderPeople(link) {
+  const el = $('#peoplecard'); if (!el) return;
+  const r = await get('/api/people').catch(() => null); if (!r || !$('#peoplecard')) return;
+  const guests = r.users.filter((u) => u.plan !== 'owner');
+  el.innerHTML = `<div class="k mono" style="color:var(--acc2)">${ic('shield', 'i14')}Dostęp dla bliskich</div>
+    <div class="wh" style="line-height:21px;margin-top:8px">Każda zaproszona osoba ma własne konto i własne skrzynki. Nie widzisz jej poczty, a ona Twojej.</div>
+    ${guests.map((u) => `<div class="rule"><span class="rv">${esc(u.email)} · ${u.accounts} skrz.</span><button class="round gl" style="width:36px;height:36px" data-rmuser="${u.id}" aria-label="Usuń osobę">${ic('x', 'i14')}</button></div>`).join('')}
+    ${r.invites.map((i) => `<div class="rule"><span class="rb inbox">zaproszenie</span><span class="rv">ważne do ${new Date(i.expires).toLocaleDateString('pl-PL')}</span><button class="round gl" style="width:36px;height:36px" data-rminv="${i.id}" aria-label="Unieważnij">${ic('x', 'i14')}</button></div>`).join('')}
+    ${link ? `<div class="wh" style="margin-top:12px;word-break:break-all;user-select:all">${esc(link)}</div><div class="actions"><button class="btn pri grow" data-sharelink="${esc(link)}">Wyślij link</button></div><div class="wh" style="font-size:12px;margin-top:6px">Link pokazuje się tylko teraz i działa raz, przez 7 dni.</div>` : `<div class="actions"><button class="btn pri grow" data-act="invite" ${guests.length + r.invites.length >= r.maxGuests ? 'disabled' : ''}>${ic('plus', 'i18')}Zaproś osobę</button></div>`}`;
 }
 
 // ---- powiadomienia push ----
@@ -458,7 +470,7 @@ async function loadAccounts(quiet) { try { S.accounts = (await get('/api/account
 let routing = 0;
 async function route() {
   const my = ++routing; const h = location.hash || '#/';
-  if (!S.user) { if (h !== '#/login') { history.replaceState(null, '', '#/login'); } return viewAuth(); }
+  if (!S.user) { if (!h.startsWith('#/join/') && h !== '#/login') { history.replaceState(null, '', '#/login'); } return viewAuth(); }
   try {
     const mm = h.match(/^#\/m\/(\d+)/);
     if (mm) await viewMessage(+mm[1]); else if (h === '#/today') await viewToday(); else if (h === '#/search') await viewSearch(); else if (h === '#/accounts') await viewAccounts(); else if (h === '#/login') go('#/'); else await viewInbox();
@@ -469,7 +481,7 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -486,6 +498,10 @@ document.addEventListener('click', async (ev) => {
     else if (d.mode) { try { localStorage.setItem('poczta.mode', JSON.stringify(d.mode)); } catch {} route(); }
     else if (d.act === 'showimg') { S.forceImg = +d.id; route(); }
     else if (d.act === 'imgtoggle') { await post('/api/organize', { images: !S.imgs }); renderOrgCard(); }
+    else if (d.act === 'invite') { const r = await post('/api/invites', {}); renderPeople(new URL(`#/join/${r.code}`, location.href.split('#')[0]).href); }
+    else if (d.sharelink) { if (navigator.share) { try { await navigator.share({ title: 'Poczta', text: 'Zaproszenie do Poczty:', url: d.sharelink }); } catch {} } else { await navigator.clipboard?.writeText(d.sharelink); toast('Link skopiowany'); } }
+    else if (d.rminv) { await api('DELETE', `/api/invites/${d.rminv}`); renderPeople(); }
+    else if (d.rmuser) { if (confirm('Usunąć tę osobę razem z jej pocztą na serwerze?')) { await api('DELETE', `/api/people/${d.rmuser}`); toast('Osoba usunięta'); renderPeople(); } }
     else if (d.rmrule) { await api('DELETE', `/api/rules/${d.rmrule}`); toast('Reguła usunięta'); renderOrgCard(); }
     else if (d.act === 'srvdel') { await post('/api/organize', { serverDelete: !S.srvdel }); renderOrgCard(); }
     else if (d.act === 'resort') { const r = await post('/api/organize', { reclassify: true }); toast(r.changed ? `Przeniesiono ${r.changed}` : 'Wszystko już na swoim miejscu'); renderOrgCard(); }

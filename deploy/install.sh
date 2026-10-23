@@ -87,8 +87,7 @@ chmod 644 /etc/systemd/system/poczta.service
 systemctl daemon-reload && systemctl enable --now poczta >/dev/null 2>&1
 systemctl restart poczta; sleep 2
 systemctl is-active --quiet poczta || { journalctl -u poczta -n 20 --no-pager >&2; die "usługa nie wystartowała (Caddy i inne aplikacje nietknięte)"; }
-UP=0; for _ in $(seq 1 30); do curl -fsS -m 3 "http://127.0.0.1:$PORT/zdrowie" >/dev/null 2>&1 && { UP=1; break; }; sleep 1; done
-[ "$UP" = 1 ] || { journalctl -u poczta -n 15 --no-pager; die "usługa nie odpowiada lokalnie"; }
+curl -fsS -m 5 "http://127.0.0.1:$PORT/zdrowie" >/dev/null || die "usługa nie odpowiada lokalnie"
 
 # 6) Trasa w Caddy (z walidacją i wycofaniem)
 mkdir -p "$CD"

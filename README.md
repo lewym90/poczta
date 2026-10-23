@@ -65,3 +65,10 @@ deploy/   install.sh
 - Obrazki pobiera serwer, nie telefon (nadawca nie widzi Twojego adresu IP ani urządzenia). Proxy łączy się wyłącznie z internetem publicznym (ochrona przed SSRF i DNS rebinding), przyjmuje tylko obrazy rastrowe i ogranicza rozmiar. Piksele śledzące (1×1, znane wzorce adresów) w ogóle nie są pobierane, więc nadawca nie dowie się, że mail został otwarty. Wyłączysz obrazki w Konta → Porządek w poczcie, a w wątku jest „Pokaż obrazki".
 - Starsze wiadomości, pobrane zanim zapisywaliśmy HTML, są dociągane z serwera poczty przy pierwszym otwarciu.
 
+
+## Zaproszenia (więcej niż jedna osoba)
+
+Właściciel: **Skrzynki → Osoby → Zaproś osobę**. Powstaje jednorazowy link (`#/join/…`, ważny 7 dni). Osoba zakłada własne konto,
+dodaje własną skrzynkę i ma własne powiadomienia, reguły i dane. Właściciel nie widzi jej poczty. Limity (zmienne w `/etc/poczta.env`):
+`POCZTA_MAX_GUESTS` (domyślnie 3 osoby) i `POCZTA_GUEST_ACCOUNTS` (domyślnie 3 skrzynki na osobę). Usunięcie osoby kasuje jej dane.
+Uwaga: administrator serwera technicznie ma dostęp do bazy i klucza szyfrującego, więc zaproszone osoby powinny o tym wiedzieć.

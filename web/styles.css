@@ -291,11 +291,15 @@ html,body{overscroll-behavior:none}main{overscroll-behavior-y:contain}
 .stkh{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;border-radius:14px;border:0;color:inherit;text-align:left;margin-bottom:8px;z-index:2;position:relative}
 .stkh[hidden]{display:none}
 .stkh .stn{display:flex;flex-direction:column;gap:2px}.stkh i{font-style:normal;font-size:11px;opacity:.65}
-.stkx{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.2,.8,.2,1)}
-.cstack.open .stkx{grid-template-rows:1fr}
-.stki{overflow:hidden;min-height:0;display:flex;flex-direction:column;gap:8px}
-.stki .row.csub{opacity:0;transform:translateY(-14px) scale(.97);animation:stkOut .45s cubic-bezier(.2,.8,.2,1) forwards;animation-delay:calc(var(--i)*45ms)}
-.stki .row.csub{margin-left:10px;width:calc(100% - 10px)}
+.stkx{display:block}
+.stki{display:flex;flex-direction:column;gap:8px}
+.stki .row.csub{margin-left:10px;width:calc(100% - 10px);will-change:transform,opacity}
 .stkm{align-self:center;margin:4px 0}
-@keyframes stkOut{to{opacity:1;transform:none}}
+
 .cstack:not(.open) .slr{right:calc(var(--L)*6px);background:rgba(255,255,255,.035)}
+
+.cstack.anim{clip-path:inset(-34px -24px 0 -24px)}
+.cstack.open .slr{transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .25s}
+/* wydajność listy: bez rozmycia tła i ciężkich cieni na każdym wierszu */
+.list .row.gl,.stkh.gl{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(22,28,44,.86);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 4px 12px rgba(0,0,0,.28)}
+.list .row{contain:layout style}

@@ -960,18 +960,48 @@ function stackRow(m, i) {
   return `<div class="cstack${n >= 6 ? ' big' : ''}" data-sid="${m.id}" style="--L:${L};--i:${i}">${Array.from({ length: L }, (_, k) => `<i class="slr" style="--k:${L - k}"></i>`).join('')}${msgRow(m, i, { stack: n })}
     <button class="stkh gl" data-stkc="${m.id}" hidden aria-label="Zwiń"><span class="stn"><b>${esc(name)}</b><i class="mono">${n} ${n < 5 ? 'wiadomości' : 'wiadomości'}</i></span>${ic('down', 'i14')}</button><div class="stkx"></div></div>`;
 }
+const SPRING = 'cubic-bezier(.22,1,.36,1)', POP = 'cubic-bezier(.34,1.45,.64,1)';
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function popIn(rows, base = 0) {
+  if (reduced()) return;
+  rows.slice(0, 9).forEach((r, k) => r.animate([{ opacity: 0, transform: 'translateY(-46px) scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 620, delay: base + k * 55, easing: POP, fill: 'backwards' }));
+}
 async function toggleStack(st, more) {
-  const box = $('.stkx', st);
+  if (st._busy) return;
   if (!more && st.classList.contains('open')) { closeStack(st); return; }
   const btn = more ? $('.stkm', st) : null, before = btn ? +btn.dataset.before : 0;
   if (btn) { btn.disabled = true; btn.textContent = 'Wczytuję…'; }
-  const r = await get(`/api/messages/${st.dataset.sid}/stack?limit=10${before ? '&before=' + before : ''}`);
-  const html = r.messages.map((m, k) => msgRow(m, k, { sub: true })).join('') + (r.more ? `<button class="btn stkm" data-stkmore="${st.dataset.sid}" data-before="${Math.min(...r.messages.map((m) => m.date))}">Pokaż więcej</button>` : '');
-  if (more) { btn.remove(); $('.stki', st).insertAdjacentHTML('beforeend', html); return; }
-  box.innerHTML = `<div class="stki">${html}</div>`;
-  $('.stkh', st).hidden = false; requestAnimationFrame(() => requestAnimationFrame(() => st.classList.add('open')));
+  st._busy = true;
+  try {
+    const r = await get(`/api/messages/${st.dataset.sid}/stack?limit=10${before ? '&before=' + before : ''}`);
+    const html = r.messages.map((m, k) => msgRow(m, k, { sub: true })).join('') + (r.more ? `<button class="btn stkm" data-stkmore="${st.dataset.sid}" data-before="${Math.min(...r.messages.map((m) => m.date))}">Pokaż więcej</button>` : '');
+    if (more) {
+      btn.remove(); const inner = $('.stki', st), n = inner.children.length;
+      inner.insertAdjacentHTML('beforeend', html); popIn([...inner.children].slice(n).filter((e) => e.matches('.row'))); return;
+    }
+    const h0 = st.offsetHeight; st._h0 = h0;
+    $('.stkx', st).innerHTML = `<div class="stki">${html}</div>`;
+    $('.stkh', st).hidden = false; st.classList.add('open', 'anim');
+    const h1 = st.offsetHeight, rows = [...st.querySelectorAll('.row.csub')];
+    if (!reduced()) {
+      st.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: 560, easing: SPRING });
+      $('.stkh', st).animate([{ opacity: 0, transform: 'translateY(10px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: SPRING });
+      popIn(rows, 60);
+    }
+    setTimeout(() => st.classList.remove('anim'), reduced() ? 0 : 620 + Math.min(rows.length, 9) * 55);
+  } finally { st._busy = false; }
 }
-function closeStack(st) { st.classList.remove('open'); $('.stkh', st).hidden = true; setTimeout(() => { if (!st.classList.contains('open')) $('.stkx', st).innerHTML = ''; }, 450); }
+function closeStack(st) {
+  if (st._busy) return; st._busy = true;
+  const H = st.offsetHeight, h0 = st._h0 || 70, rows = [...st.querySelectorAll('.row.csub')];
+  st.classList.add('anim');
+  const fin = () => { st.classList.remove('open', 'anim'); $('.stkh', st).hidden = true; $('.stkx', st).innerHTML = ''; st._busy = false; if (!reduced()) $('.cstack > .row', st)?.animate([{ opacity: 0, transform: 'scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: SPRING }); };
+  if (reduced()) { fin(); return; }
+  rows.slice(0, 9).forEach((r, k, arr) => r.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-34px) scale(.92)' }], { duration: 260, delay: (arr.length - 1 - k) * 28, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' }));
+  $('.stkh', st).animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, fill: 'forwards' });
+  const an = st.animate([{ height: H + 'px' }, { height: h0 + 'px' }], { duration: 440, delay: 90, easing: SPRING });
+  an.onfinish = fin;
+}
 
 // ---- nawigacja, zdarzenia ----
 function nav(cur) { document.querySelectorAll('.tab').forEach((t) => t.toggleAttribute('aria-current', false) || (t.dataset.tab === cur && t.setAttribute('aria-current', 'page'))); const bd = $('#bd-inbox'); bd.textContent = S.unread > 99 ? '99+' : S.unread; bd.hidden = !S.unread; }

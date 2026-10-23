@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Poczta</title>
+<meta name="theme-color" content="#05070D">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Poczta">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="bg" aria-hidden="true"><div class="orb o1"></div><div class="orb o2"></div><div class="dots"></div></div>
+<div id="app">
+  <main id="view" aria-live="polite"></main>
+  <button id="fab" class="fab" hidden aria-label="Nowa wiadomość"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19.500 8.500a2.100 2.100 0 0 0-3-3L5 17z"/><path d="m14.500 7.500 3 3"/></svg></button>
+  <nav id="tabbar" class="tabbar gl" hidden aria-label="Główna nawigacja">
+    <button class="tab" data-tab="inbox"><span id="bd-inbox" class="bd" hidden></span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path class="f" d="M4 13.500 6.200 5.800A2 2 0 0 1 8.100 4.500h7.800a2 2 0 0 1 1.900 1.300L20 13.500v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 13.500 6.200 5.800A2 2 0 0 1 8.100 4.500h7.800a2 2 0 0 1 1.900 1.300L20 13.500v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 13.500h4.500l1 2.500h5l1-2.500H20"/></svg>Skrzynka</button>
+    <button class="tab" data-tab="today"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle class="f" cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="4"/><path d="M12 2.500v2M12 19.500v2M2.500 12h2M19.500 12h2M5.300 5.300l1.400 1.400M17.300 17.300l1.400 1.400M18.700 5.300l-1.400 1.400M6.700 17.300l-1.400 1.400"/></svg>Dziś</button>
+    <button class="tab" data-tab="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle class="f" cx="11" cy="11" r="6.500"/><circle cx="11" cy="11" r="6.500"/><path d="m16 16 4.500 4.500"/></svg>Szukaj</button>
+    <button class="tab" data-tab="accounts"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle class="f" cx="12" cy="8.500" r="3.600"/><circle cx="12" cy="8.500" r="3.600"/><path d="M5 20c.8-3.600 3.600-5.500 7-5.500s6.200 1.900 7 5.500"/></svg>Konta</button>
+  </nav>
+  <div id="sheet-root"></div>
+  <div id="toast" class="toast gl" role="status"></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

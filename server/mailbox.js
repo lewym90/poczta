@@ -4,7 +4,7 @@ import { classify, addrDomain, isFreemail } from './intel/classify.js';
 import { assessRisk } from './intel/risk.js';
 import { extractItems } from './intel/extract.js';
 
-export const CATS = ['inbox', 'offers', 'spam', 'trash', 'blocked', 'sent', 'drafts'];
+export const CATS = ['inbox', 'offers', 'spam', 'trash', 'blocked', 'sent', 'drafts', 'archive', 'other'];
 const ph = (a) => a.map(() => '?').join(',');
 const inboxSql = "cat='inbox'";
 
@@ -42,8 +42,8 @@ export function moveTo(uid, ids, cat, by = 'user') {
   tx(() => {
     for (const r of rows) {
       if (r.cat === cat) continue;
-      const gone = cat === 'trash' || cat === 'blocked', wasGone = r.cat === 'trash' || r.cat === 'blocked';
-      if (gone && wasGone) db.prepare('UPDATE messages SET cat=?, cat_by=? WHERE id=?').run(cat, by, r.id);
+      const gone = cat === 'trash' || cat === 'blocked' || cat === 'archive', wasGone = r.cat === 'trash' || r.cat === 'blocked' || r.cat === 'archive';
+      if (gone && wasGone && !(cat === 'archive' && r.cat !== 'archive') && !(r.cat === 'archive' && cat !== 'archive')) db.prepare('UPDATE messages SET cat=?, cat_by=? WHERE id=?').run(cat, by, r.id);
       else if (gone) db.prepare('UPDATE messages SET cat=?, cat_by=?, trashed_from=?, deleted_at=?, server_done=0, server_try=0, snoozed_until=NULL WHERE id=?').run(cat, by, r.cat, now, r.id);
       else db.prepare('UPDATE messages SET cat=?, cat_by=?, trashed_from=NULL, deleted_at=NULL, snoozed_until=NULL WHERE id=?').run(cat, by, r.id);
       if (cat !== 'inbox') db.prepare("DELETE FROM found_items WHERE message_id=? AND status='new'").run(r.id);
@@ -72,9 +72,28 @@ export function applyRuleNow(uid, kind, value, action) {
   return ids;
 }
 
+// gwiazdka: lokalnie od razu, u dostawcy w tle (robi to trasa)
+export function star(uid, ids, on) {
+  ids = ids.map(Number).filter(Boolean).slice(0, 1000); if (!ids.length) return [];
+  const rows = db.prepare(`SELECT id FROM messages WHERE user_id=? AND id IN (${ph(ids)})`).all(uid, ...ids).map((r) => r.id);
+  for (const id of rows) db.prepare('UPDATE messages SET starred=? WHERE id=?').run(on ? 1 : 0, id);
+  return rows;
+}
+// cofnięcie spamu/oferty/blokady: usuwa regułę nadawcy (i jego domeny), a wiadomości wracają do skrzynki
+export function unrule(uid, ids) {
+  ids = ids.map(Number).filter(Boolean).slice(0, 1000); if (!ids.length) return [];
+  const rows = db.prepare(`SELECT id,from_addr FROM messages WHERE user_id=? AND folder='INBOX' AND id IN (${ph(ids)})`).all(uid, ...ids);
+  const del = db.prepare('DELETE FROM rules WHERE user_id=? AND kind=? AND value=?');
+  for (const a of new Set(rows.map((r) => String(r.from_addr || '').toLowerCase()).filter(Boolean))) { del.run(uid, 'sender', a); del.run(uid, 'domain', addrDomain(a)); }
+  const done = moveTo(uid, rows.map((r) => r.id), 'inbox', 'user');
+  audit(uid, 'unrule', `${done.length}`); return done;
+}
 export function mark(uid, ids, action, scope = 'sender') {
   ids = ids.map(Number).filter(Boolean).slice(0, 1000);
   if (action === 'delete') return moveTo(uid, ids, 'trash');
+  if (action === 'unrule') return unrule(uid, ids);
+  if (action === 'archive') { const own = db.prepare(`SELECT id FROM messages WHERE user_id=? AND folder='INBOX' AND cat IN ('inbox','offers','spam') AND id IN (${ph(ids)})`).all(uid, ...ids).map((r) => r.id); return moveTo(uid, own, 'archive'); }
+  if (action === 'unarchive') return moveTo(uid, ids, 'inbox');
   if (action === 'restore') return restore(uid, ids);
   if (!['spam', 'offers', 'inbox', 'block'].includes(action)) throw new Error('Nieznana czynność');
   const rows = db.prepare(`SELECT id,from_addr FROM messages WHERE user_id=? AND folder='INBOX' AND id IN (${ph(ids)})`).all(uid, ...ids);
@@ -129,7 +148,8 @@ export function counts(uid) {
   const now = Date.now();
   const c = (cat) => db.prepare('SELECT COUNT(*) n, COALESCE(SUM(unread),0) u FROM messages WHERE user_id=? AND cat=?').get(uid, cat);
   return {
-    offers: c('offers').n, offers_unread: c('offers').u, spam: c('spam').n, trash: c('trash').n, sent: c('sent').n, drafts: c('drafts').n,
+    offers: c('offers').n, offers_unread: c('offers').u, spam: c('spam').n, trash: c('trash').n, sent: c('sent').n, drafts: c('drafts').n, archive: c('archive').n,
+    starred: db.prepare("SELECT COUNT(*) n FROM messages WHERE user_id=? AND starred=1 AND cat IN ('inbox','offers','sent','archive')").get(uid).n,
     snoozed: db.prepare("SELECT COUNT(*) n FROM messages WHERE user_id=? AND cat='inbox' AND snoozed_until>?").get(uid, now).n,
   };
 }

@@ -96,6 +96,20 @@ export async function flushTrash(trash, now = Date.now()) {
   }
   return n;
 }
+// Archiwizacja u dostawcy po tym samym okresie karencji co kosz (można cofnąć w aplikacji).
+export async function flushArchive(archive, now = Date.now()) {
+  const rows = db.prepare("SELECT id,user_id,account_id,uid FROM messages WHERE cat='archive' AND folder='INBOX' AND server_done=0 AND deleted_at<=?").all(now - GRACE);
+  const by = new Map(); for (const r of rows) { if (!by.has(r.account_id)) by.set(r.account_id, []); by.get(r.account_id).push(r); }
+  let n = 0;
+  for (const [accId, list] of by) {
+    for (let i = 0; i < list.length; i += 100) {
+      const chunk = list.slice(i, i + 100);
+      try { await archive(accId, chunk.map((r) => r.uid)); for (const r of chunk) db.prepare('UPDATE messages SET server_done=1 WHERE id=?').run(r.id); n += chunk.length; }
+      catch { for (const r of chunk) db.prepare('UPDATE messages SET server_try=server_try+1, server_done=CASE WHEN server_try>=2 THEN 2 ELSE 0 END WHERE id=?').run(r.id); }
+    }
+  }
+  return n;
+}
 export function purgeOld(now = Date.now()) {
   const old = db.prepare("SELECT id FROM messages WHERE cat IN ('trash','blocked') AND server_done!=0 AND deleted_at<=?").all(now - KEEP_DAYS * 86400e3);
   for (const { id } of old) { db.prepare('DELETE FROM messages_fts WHERE rowid=?').run(id); db.prepare('DELETE FROM messages WHERE id=?').run(id); }
@@ -107,7 +121,7 @@ export function startJobs(emit, hooks = {}) {
   const t = setInterval(async () => {
     try { wakeSnoozed(emit); runDigests(); } catch { /* następny przebieg */ }
     if (busy || !hooks.trash) return; busy = true;
-    try { await flushTrash(hooks.trash); purgeOld(); } catch { /* następny przebieg */ } finally { busy = false; }
+    try { await flushTrash(hooks.trash); if (hooks.archive) await flushArchive(hooks.archive); purgeOld(); } catch { /* następny przebieg */ } finally { busy = false; }
   }, 30000);
   t.unref();
   return () => clearInterval(t);

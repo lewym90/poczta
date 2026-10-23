@@ -28,6 +28,23 @@ export function saveAtts(messageId, userId, atts) {
   db.prepare('UPDATE messages SET att_try=1, has_attach=? WHERE id=?').run(atts.some((a) => !a.inline) ? 1 : 0, messageId);
 }
 
+// Normalizacja tematu do klucza rozmowy: bez Re:/Fwd:/Odp: i wielkości liter.
+export const threadKey = (subject) => {
+  let t = String(subject || '').toLowerCase().trim();
+  for (let i = 0; i < 6; i++) { const n = t.replace(/^(re|fwd?|odp|pd|fw|aw|sv|vs|antw)(\[\d+\])?\s*:\s*/i, ''); if (n === t) break; t = n; }
+  t = t.replace(/\s+/g, ' ').trim();
+  return t && t !== '(bez tematu)' ? t.slice(0, 200) : null;
+};
+function saveExtras(id, m) {
+  db.prepare('UPDATE messages SET cc_addr=?, refs=?, starred=?, thread_key=? WHERE id=?').run(m.ccAddr || null, m.refs || null, m.starred ? 1 : 0, threadKey(m.subject), id);
+}
+export function backfillThreads() {
+  const rows = db.prepare('SELECT id,subject FROM messages WHERE thread_key IS NULL AND subject IS NOT NULL LIMIT 5000').all();
+  const up = db.prepare("UPDATE messages SET thread_key=? WHERE id=?");
+  tx(() => { for (const r of rows) up.run(threadKey(r.subject) ?? '', r.id); });
+  return rows.length;
+}
+
 export function storeMessages(acc, messages) {
   const insM = db.prepare(`INSERT OR IGNORE INTO messages(user_id,account_id,folder,uid,message_id,from_name,from_addr,to_addr,subject,snippet,body,date,unread,has_attach,risk,risk_reasons,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -48,6 +65,7 @@ export function storeMessages(acc, messages) {
       db.prepare('UPDATE messages SET cat=?, cat_by=?, cat_why=?, deleted_at=? WHERE id=?').run(sorted.cat, sorted.by === 'rule' ? 'rule' : 'auto', sorted.why || null, blocked ? Date.now() : null, id);
       if (m.html && !blocked && m.html.length < 3e6) db.prepare('UPDATE messages SET html_z=?, html_try=1 WHERE id=?').run(zlib.deflateSync(Buffer.from(m.html)), id);
       else if (!m.html) db.prepare('UPDATE messages SET html_try=2 WHERE id=?').run(id); // wiadomość tylko tekstowa: nie ma czego dociągać
+      saveExtras(id, m);
       saveAtts(id, acc.user_id, m.atts);
       if (blocked) continue; // zablokowany nadawca: bez śladu w aplikacji, wiadomość trafia do kosza u dostawcy
       insF.run(id, m.subject, `${m.fromName} ${m.fromAddr}`, m.body.slice(0, 60000));
@@ -91,10 +109,10 @@ export async function backfillHtml(accId) {
 }
 
 // Wysłane i Szkice: osobne foldery u dostawcy. Ścieżki wykrywamy raz (folder_state), potem synchronizujemy co najwyżej co 90 s.
-export const folderPath = (accId, folder) => (folder === 'INBOX' ? 'INBOX' : db.prepare('SELECT path FROM folder_state WHERE account_id=? AND folder=?').get(accId, folder)?.path || 'INBOX__brak');
+export const folderPath = (accId, folder) => (folder === 'INBOX' ? 'INBOX' : folder.startsWith('X:') ? folder.slice(2) : db.prepare('SELECT path FROM folder_state WHERE account_id=? AND folder=?').get(accId, folder)?.path || 'INBOX__brak');
 const FOLDER_DEF = { SENT: { cat: 'sent', first: 40 }, DRAFTS: { cat: 'drafts', first: 30 } };
-function storeFolder(acc, folder, messages) {
-  const cat = FOLDER_DEF[folder].cat;
+function storeFolder(acc, folder, messages, catOverride) {
+  const cat = catOverride || FOLDER_DEF[folder].cat;
   const ins = db.prepare(`INSERT OR IGNORE INTO messages(user_id,account_id,folder,uid,message_id,from_name,from_addr,to_addr,subject,snippet,body,date,unread,has_attach,cat,cat_by,att_try,html_try,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,'auto',1,?,?)`);
   const insF = db.prepare('INSERT INTO messages_fts(rowid,subject,from_text,body) VALUES(?,?,?,?)');
@@ -106,11 +124,20 @@ function storeFolder(acc, folder, messages) {
       if (!r.changes) continue; n++;
       const id = Number(r.lastInsertRowid);
       if (html) db.prepare('UPDATE messages SET html_z=? WHERE id=?').run(zlib.deflateSync(Buffer.from(html)), id);
+      saveExtras(id, m);
       saveAtts(id, acc.user_id, m.atts);
       insF.run(id, m.subject, `${m.toAddr} ${m.fromAddr}`, m.body.slice(0, 60000));
     }
   });
   return n;
+}
+// Przeglądanie dowolnego folderu dostawcy (np. etykiety Gmaila): pobieramy ostatnie 40 wiadomości na żądanie.
+export async function openFolder(accId, path, count = 40) {
+  const acc = db.prepare("SELECT * FROM accounts WHERE id=? AND provider='imap'").get(accId);
+  if (!acc || !path || path.length > 300) return null;
+  const res = await imap.sync({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), { lastUid: 0, first: count, path });
+  storeFolder(acc, `X:${path}`, res.messages, 'other');
+  return `X:${path}`;
 }
 const foldering = new Set();
 export async function syncFolders(accId, { force = false } = {}) {
@@ -220,6 +247,7 @@ export function unwatchAccount(id) {
 export const watching = (id) => !!watchers.get(id)?.live;
 
 export function startScheduler() {
+  try { while (backfillThreads() === 5000); } catch { /* następne uruchomienie */ }
   db.prepare('UPDATE messages SET html_try=0 WHERE html_z IS NULL AND html_try=1').run(); // przerwane dociąganie z poprzedniego uruchomienia
   for (const { id } of db.prepare("SELECT id FROM accounts WHERE provider='imap'").all()) { watchAccount(id); setTimeout(() => backfillHtml(id).catch(() => {}), 4000); }
   // Zapasowe odpytywanie: rzadziej, gdy IDLE działa.
@@ -233,6 +261,11 @@ export function startScheduler() {
       const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(accId);
       if (!acc || acc.provider !== 'imap') return uids.length; // demo: nic do przenoszenia
       return imap.trash({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), uids, folderPath(accId, folder));
+    },
+    archive: async (accId, uids) => {
+      const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(accId);
+      if (!acc || acc.provider !== 'imap') return uids.length;
+      return imap.archive({ ...JSON.parse(acc.config), email: acc.email }, accountSecret(acc), uids);
     },
   });
   return () => { clearInterval(t); stopJobs(); };

@@ -78,6 +78,12 @@ const MIGRATIONS = [
    CREATE TABLE folder_state(
      account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, folder TEXT NOT NULL, path TEXT, last_uid INTEGER NOT NULL DEFAULT 0, synced_at INTEGER,
      PRIMARY KEY(account_id, folder));`,
+  `ALTER TABLE messages ADD COLUMN cc_addr TEXT;
+   ALTER TABLE messages ADD COLUMN refs TEXT;
+   ALTER TABLE messages ADD COLUMN thread_key TEXT;
+   ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX msg_thread ON messages(user_id, account_id, thread_key);
+   CREATE INDEX msg_star ON messages(user_id, starred);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

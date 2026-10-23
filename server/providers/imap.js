@@ -2,6 +2,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { assertPublicHost } from '../security.js';
 
 const client = (cfg, pass) => new ImapFlow({
@@ -31,7 +32,7 @@ async function normalize(msg) {
   const body = (p.text || htmlToText(p.html || '')).replace(/\[(?:image|obraz|logo)[^\]\n]{0,80}\]/gi, '').replace(/\r/g, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 200000);
   const from = p.from?.value?.[0] || {};
   return {
-    uid: msg.uid, messageId: p.messageId || null,
+    uid: msg.uid, messageId: p.messageId || null, refs: [].concat(p.references || []).join(' ').slice(0, 2000) || null, ccAddr: (p.cc?.value || []).map((x) => x.address).filter(Boolean).join(', '), starred: !!msg.flags?.has('\\Flagged'),
     fromName: from.name || from.address || '', fromAddr: from.address || '', toAddr: (p.to?.value || []).map((x) => x.address).join(', '),
     subject: p.subject || '(bez tematu)', body, snippet: body.replace(/\s+/g, ' ').slice(0, 160),
     date: (p.date || msg.internalDate || new Date()).getTime(), unread: !msg.flags?.has('\\Seen'),
@@ -164,19 +165,61 @@ export const imap = {
       return uids.length;
     } finally { await c.logout().catch(() => {}); }
   },
-  async setSeen(cfg, pass, uid, seen) {
+  async setSeen(cfg, pass, uid, seen, path = 'INBOX') {
     const c = client(cfg, pass);
     try {
-      await c.connect(); const lock = await c.getMailboxLock('INBOX');
+      await c.connect(); const lock = await c.getMailboxLock(path);
       try { await (seen ? c.messageFlagsAdd(uid, ['\\Seen'], { uid: true }) : c.messageFlagsRemove(uid, ['\\Seen'], { uid: true })); } finally { lock.release(); }
     } finally { await c.logout().catch(() => {}); }
   },
   async send(cfg, pass, msg) {
     const t = transport(cfg, pass);
-    return t.sendMail({ from: msg.from, to: msg.to, subject: msg.subject, text: msg.text, inReplyTo: msg.inReplyTo || undefined, references: msg.inReplyTo || undefined });
+    return t.sendMail(mailOpts(msg));
+  },
+  // Zapisuje szkic w folderze Szkice u dostawcy (flaga \\Draft), wraz z załącznikami.
+  async saveDraft(cfg, pass, msg, path) {
+    const raw = await new Promise((res, rej) => new MailComposer(mailOpts(msg)).compile().build((e, b) => (e ? rej(e) : res(b))));
+    const c = client(cfg, pass);
+    try { await c.connect(); await c.append(path, raw, ['\\Draft', '\\Seen']); } finally { await c.logout().catch(() => {}); }
+  },
+  // Gwiazdka (\\Flagged) po stronie dostawcy.
+  async setFlagged(cfg, pass, uid, on, path = 'INBOX') {
+    const c = client(cfg, pass);
+    try {
+      await c.connect(); const lock = await c.getMailboxLock(path);
+      try { await (on ? c.messageFlagsAdd(uid, ['\\Flagged'], { uid: true }) : c.messageFlagsRemove(uid, ['\\Flagged'], { uid: true })); } finally { lock.release(); }
+    } finally { await c.logout().catch(() => {}); }
+  },
+  // Archiwizacja: przeniesienie do folderu \\Archive (u Gmaila: Cała poczta), a gdy go brak, zwykłe pozostawienie w skrzynce.
+  async archive(cfg, pass, uids) {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      const boxes = await c.list();
+      const t = boxes.find((b) => b.specialUse === '\\Archive') || boxes.find((b) => b.specialUse === '\\All') || boxes.find((b) => /^(archive|archiwum|\[gmail\]\/(all mail|cała poczta|wszystkie))$/i.test(b.path));
+      if (!t) throw new Error('Nie znaleziono archiwum u dostawcy');
+      const lock = await c.getMailboxLock('INBOX');
+      try { await c.messageMove(uids.join(','), t.path, { uid: true }); } finally { lock.release(); }
+      return uids.length;
+    } finally { await c.logout().catch(() => {}); }
+  },
+  // Lista wszystkich folderów u dostawcy (do przeglądania).
+  async folders(cfg, pass) {
+    const c = client(cfg, pass);
+    try {
+      await c.connect();
+      return (await c.list()).filter((b) => !b.flags?.has('\\Noselect') && !b.flags?.has('\\NonExistent')).map((b) => ({ path: b.path, name: b.name, use: b.specialUse || '' }));
+    } finally { await c.logout().catch(() => {}); }
   },
 };
 
+function mailOpts(msg) {
+  return {
+    from: msg.from, to: msg.to || undefined, cc: msg.cc || undefined, bcc: msg.bcc || undefined, subject: msg.subject || '', text: msg.text || '',
+    inReplyTo: msg.inReplyTo || undefined, references: msg.references || msg.inReplyTo || undefined,
+    attachments: (msg.attachments || []).map((a) => ({ filename: a.name, contentType: a.type || undefined, content: a.content })),
+  };
+}
 function transport(cfg, pass) {
   return nodemailer.createTransport({ host: cfg.smtp.host, port: cfg.smtp.port, secure: cfg.smtp.secure, auth: { user: cfg.user || cfg.email, pass }, connectionTimeout: 20000 });
 }

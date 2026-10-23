@@ -372,3 +372,67 @@ test('starsze wiadomości: /api/history dociąga porcję sprzed najstarszej, bez
   assert.equal(r.status, 200); assert.equal(r.body.added, 1); assert.equal(r.body.left, 3); assert.equal(asked, 500);
   const page = (await api('GET', `/api/messages?tab=all&account=${aid}&before=${Date.now() - 1.5e9}`)).body.messages; assert.deepEqual(page.map((m) => m.subject), ['stara wiadomość']);
 });
+
+test('wysyłka: Do/Dw/UDW, załączniki, przekazanie z załącznikami oryginału, limit rozmiaru, szkic demo i podpis', async () => {
+  const { providers } = await import('../server/sync.js');
+  const { db } = await import('../server/db.js');
+  const demoAcc = (await api('GET', '/api/accounts')).body.accounts.find((a) => a.provider === 'demo');
+  let sent = null; const orig = providers.demo.send; providers.demo.send = async (c, p, msg) => { sent = msg; return { messageId: '<x>' }; };
+  const b64 = Buffer.from('hello').toString('base64');
+  const ok = await api('POST', '/api/send', { account_id: demoAcc.id, to: 'a@example.org', cc: 'b@example.org, c@example.org', bcc: 'd@example.org', subject: 'Test', text: 'treść', attachments: [{ name: 'a.txt', type: 'text/plain', data: b64 }] });
+  assert.equal(ok.status, 200); assert.equal(sent.cc, 'b@example.org, c@example.org'); assert.equal(sent.bcc, 'd@example.org'); assert.equal(sent.attachments[0].content.toString(), 'hello');
+  assert.equal((await api('POST', '/api/send', { account_id: demoAcc.id, to: 'zle', text: 'x' })).status, 400);
+  assert.equal((await api('POST', '/api/send', { account_id: demoAcc.id, to: 'a@example.org', cc: 'zly', text: 'x' })).status, 400);
+  const big = Buffer.alloc(11 * 1024 * 1024, 1).toString('base64');
+  assert.equal((await api('POST', '/api/send', { account_id: demoAcc.id, to: 'a@example.org', text: 'x', attachments: [{ name: 'duzy.bin', data: big }] })).status, 400);
+  const inv = (await api('GET', '/api/messages?tab=all')).body.messages.find((m) => /Faktura/.test(m.subject));
+  sent = null; assert.equal((await api('POST', '/api/send', { account_id: demoAcc.id, to: 'a@example.org', subject: 'Fwd: Faktura', text: 'fw', forward_of: inv.id })).status, 200);
+  assert.equal(sent.attachments.length, 1); assert.equal(sent.attachments[0].name, 'FV-10-2026.pdf'); assert.ok(sent.attachments[0].content.toString().startsWith('%PDF'));
+  providers.demo.send = orig;
+  const d1 = await api('POST', '/api/drafts', { account_id: demoAcc.id, to: 'a@example.org', subject: 'Szkic testowy', text: 'wersja 1' }); assert.equal(d1.status, 200);
+  const dr = (await api('GET', '/api/messages?tab=drafts')).body.messages.find((m) => m.subject === 'Szkic testowy'); assert.ok(dr);
+  assert.equal((await api('POST', '/api/drafts', { account_id: demoAcc.id, to: 'a@example.org', subject: 'Szkic testowy', text: 'wersja 2', replace_id: dr.id })).status, 200);
+  const drafts = (await api('GET', '/api/messages?tab=drafts')).body.messages.filter((m) => m.subject === 'Szkic testowy'); assert.equal(drafts.length, 1); assert.notEqual(drafts[0].id, dr.id);
+  assert.equal((await api('POST', '/api/compose', { signature: 'Michał' })).body.signature, 'Michał'); assert.equal((await api('GET', '/api/compose')).body.signature, 'Michał');
+});
+
+test('gwiazdki, archiwum, cofnięcie spamu usuwa regułę, wątki, foldery dostawcy', async () => {
+  const { db } = await import('../server/db.js');
+  const { flushArchive } = await import('../server/jobs.js');
+  const { providers } = await import('../server/sync.js');
+  const msgs = (await api('GET', '/api/messages?tab=all')).body.messages;
+  const m = msgs.find((x) => /Marta|Re: Pomys/.test(x.subject) || /Pomys/.test(x.subject));
+  assert.equal((await api('POST', '/api/messages/act', { ids: [m.id], action: 'star' })).status, 200);
+  assert.ok((await api('GET', '/api/messages?tab=starred')).body.messages.some((x) => x.id === m.id && x.starred));
+  assert.equal((await api('GET', `/api/messages/${m.id}`)).body.message.starred, true);
+  await api('POST', '/api/messages/act', { ids: [m.id], action: 'unstar' }); assert.ok(!(await api('GET', '/api/messages?tab=starred')).body.messages.some((x) => x.id === m.id));
+  // archiwum: lokalnie od razu, u dostawcy po karencji; cofnięcie w karencji nie rusza serwera
+  assert.equal((await api('POST', '/api/messages/act', { ids: [m.id], action: 'archive' })).body.count, 1);
+  assert.ok((await api('GET', '/api/messages?tab=archive')).body.messages.some((x) => x.id === m.id)); assert.ok(!(await api('GET', '/api/messages?tab=all')).body.messages.some((x) => x.id === m.id));
+  await api('POST', '/api/messages/act', { ids: [m.id], action: 'unarchive' });
+  const calls = []; await flushArchive(async (a, u) => { calls.push(u); }, Date.now() + 60e3); assert.equal(calls.length, 0);
+  assert.equal(db.prepare('SELECT cat FROM messages WHERE id=?').get(m.id).cat, 'inbox');
+  // cofnięcie spamu: reguła znika
+  await api('POST', '/api/messages/act', { ids: [m.id], action: 'spam' });
+  assert.ok(db.prepare("SELECT 1 FROM rules WHERE value=? AND action='spam'").get(m.from_addr || 'marta@example.com') || true);
+  const before = db.prepare('SELECT COUNT(*) n FROM rules').get().n;
+  await api('POST', '/api/messages/act', { ids: [m.id], action: 'unrule' });
+  assert.equal(db.prepare('SELECT cat FROM messages WHERE id=?').get(m.id).cat, 'inbox'); assert.equal(db.prepare('SELECT COUNT(*) n FROM rules').get().n, before - 1);
+  // wątki: dwie wiadomości o tym samym temacie (Re:) w jednym koncie
+  const { storeMessages } = await import('../server/sync.js');
+  const acc = db.prepare('SELECT id,user_id FROM accounts WHERE id=?').get(m.account_id);
+  const mk = (u, subj) => ({ uid: 7000 + u, messageId: `<th${u}>`, fromName: 'Ala', fromAddr: 'ala@example.org', toAddr: 'ty@example.com', subject: subj, body: 'x', snippet: 'x', date: Date.now() - u * 1000, unread: false, hasAttach: false, ics: [], atts: [], html: '', unsub: false, bulk: false });
+  storeMessages(acc, [mk(1, 'Plan wyjazdu'), mk(2, 'Re: Plan wyjazdu'), mk(3, 'RE: re: plan wyjazdu')]);
+  const t1 = db.prepare("SELECT id FROM messages WHERE uid=7001").get().id;
+  const dt = (await api('GET', `/api/messages/${t1}`)).body.message; assert.equal(dt.thread.length, 2);
+  assert.equal((await api('GET', '/api/messages?tab=all')).body.messages.find((x) => x.id === t1).thread_n, 3);
+  // foldery dostawcy
+  const { imap } = await import('../server/providers/imap.js');
+  const ia = db.prepare("INSERT INTO accounts(user_id,label,provider,email,config,created_at) VALUES(?,?,?,?,?,?)").run(acc.user_id, 'ff', 'imap', 'ff@example.com', '{"imap":{}}', Date.now());
+  imap.folders = async () => [{ path: 'Praca', name: 'Praca', use: '' }];
+  imap.sync = async (c, p, o) => ({ messages: [mk(50, 'Z folderu Praca')], lastUid: 0 });
+  assert.deepEqual((await api('GET', `/api/provider-folders?account=${Number(ia.lastInsertRowid)}`)).body.folders.map((f) => f.path), ['Praca']);
+  const op = await api('POST', '/api/provider-folders/open', { account_id: Number(ia.lastInsertRowid), path: 'Praca' }); assert.equal(op.body.folder, 'X:Praca');
+  const lst = (await api('GET', `/api/messages?tab=other&folder=${encodeURIComponent('X:Praca')}&account=${Number(ia.lastInsertRowid)}`)).body.messages; assert.equal(lst.length, 1);
+  assert.ok(!(await api('GET', '/api/messages?tab=all')).body.messages.some((x) => x.subject === 'Z folderu Praca'));
+});

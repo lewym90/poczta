@@ -18,6 +18,7 @@ const P = {
   more: '<circle cx="6" cy="12" r="1.600"/><circle cx="12" cy="12" r="1.600"/><circle cx="18" cy="12" r="1.600"/>', ban: '<circle cx="12" cy="12" r="8.500"/><path d="m6 6 12 12"/>', tag: '<path d="M3.500 12.500V5.500a2 2 0 0 1 2-2h7l8 8-8.500 8.500zM8 8h.01"/>', inbox2: '<path d="M4 13.500 6.500 5h11L20 13.500V18a1.500 1.500 0 0 1-1.500 1.500h-13A1.500 1.500 0 0 1 4 18zM4 13.500h4.500l1 2h5l1-2H20"/>',
   clock: '<circle cx="12" cy="12" r="8.500"/><path d="M12 7.500V12l3 2"/>', wallet: '<path d="M4 8.500A2.500 2.500 0 0 1 6.500 6H18v3M4 8.500V17a2 2 0 0 0 2 2h12a1 1 0 0 0 1-1V9H6.500A2.500 2.500 0 0 1 4 8.500zM15.500 14h1.500"/>',
   bell: '<path d="M6 17.500V11a6 6 0 0 1 12 0v6.500l1.500 1.500h-15zM10 21h4"/>', bellOff: '<path d="M6 17.500V11a6 6 0 0 1 9-5.200M18 11v6.500l1.500 1.500h-15M10 21h4M4 4l16 16"/>',
+  star: '<path d="m12 3.800 2.600 5.300 5.800.800-4.200 4.100 1 5.800L12 17.100 6.800 19.800l1-5.800-4.200-4.100 5.800-.800z"/>',
   clip: '<path d="m19 11.500-7.200 7.200a4.500 4.500 0 0 1-6.400-6.400l8-8a3 3 0 0 1 4.200 4.200l-8 8a1.500 1.500 0 0 1-2.100-2.100l7-7"/>', file: '<path d="M7 3.500h6.500L18.500 8.500v11a1 1 0 0 1-1 1h-10.500a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z"/><path d="M13.500 3.500v5h5"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
 };
@@ -129,8 +130,8 @@ function msgRow(m, i) {
   const chip = snz || why || (m.risk >= 2 ? `<span class="cp bad">${ic('shield', 'i14')}Podejrzana wiadomość</span>` : it ? `<span class="cp">${ic(KIND_ICON[it.kind], 'i14')}${esc(whenText(it))}</span>` : '');
   return `<button class="row gl ${m.unread ? 'unread' : ''}" style="--i:${i}" data-open="${m.id}" aria-label="${esc(m.from_name)}: ${esc(m.subject)}">
     <div class="av">${ringSvg('u-' + (m.risk >= 2 ? 'hi' : m.urgency))}<div class="a ${hue(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_addr)}">${esc(initials(m.cat === 'sent' || m.cat === 'drafts' ? m.to_addr : m.from_name))}</div></div>
-    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
-    <div class="sj">${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : `<div class="sn">${esc(m.snippet)}</div>`}</div></button>`;
+    <div class="rb"><div class="h"><span class="nm">${m.unread ? '<span class="ud"></span>' : ''}<span>${m.cat === 'sent' || m.cat === 'drafts' ? `${m.cat === 'drafts' ? 'Szkic · ' : ''}Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</span></span><span class="tm mono">${m.starred ? ic('star', 'i14 stl') : ''}${m.has_attach ? ic('clip', 'i14 clp') : ''}${fmtTime(m.date)}</span></div>
+    <div class="sj">${m.thread_n > 1 ? `<span class="thn mono">${m.thread_n}</span>` : ''}${esc(m.subject)}</div>${accTag(m)}${chip ? `<div class="chiprow">${chip}</div>` : `<div class="sn">${esc(m.snippet)}</div>`}</div></button>`;
 }
 
 function heroHtml(t) {
@@ -147,6 +148,7 @@ async function viewInbox() {
   let msgs, today, pay = null;
   try {
     const q = new URLSearchParams({ tab: S.seg === 'msg' ? S.filter : 'all', limit: '60' }); if (S.account) q.set('account', S.account);
+    if (S.filter === 'other' && S.otherFolder) { q.set('folder', S.otherFolder.key); q.set('account', S.otherFolder.acc); }
     [msgs, today, pay] = await Promise.all([get('/api/messages?' + q), get('/api/today'), S.seg === 'pay' ? get('/api/obligations') : null]);
     cacheSet('inbox', { msgs, today }); S.offline = false;
   } catch (e) { if (e.status) throw e; const c = cacheGet('inbox'); if (!c) throw e; ({ msgs, today } = c); S.offline = true; }
@@ -166,7 +168,7 @@ async function viewInbox() {
     <div class="top"><button class="pill gl" data-act="accmenu" aria-label="Wybierz konto: ${esc(accLabel)}"><span class="stack">${stackDots}</span>${esc(accLabel)}${ic('down', 'i14')}</button><button class="round gl" data-go="#/search" aria-label="Szukaj">${ic('search')}</button></div>
     ${S.accounts.length ? heroHtml(today) : ''}
     ${S.accounts.length ? `<div class="seg gl"><button data-seg="msg" aria-pressed="${S.seg === 'msg'}">Wiadomości</button><button data-seg="cases" aria-pressed="${S.seg === 'cases'}">Sprawy<b>${pend.length}</b></button><button data-seg="pay" aria-pressed="${S.seg === 'pay'}">Płatności</button></div>` : ''}
-    ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash', 'sent', 'drafts'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
+    ${S.seg === 'msg' && ['snoozed', 'offers', 'spam', 'trash', 'sent', 'drafts', 'archive', 'starred', 'other'].includes(S.filter) ? '' : found}${body}`, { fab: !!S.accounts.length });
   nav('inbox');
   S.oldest = msgs.messages.length ? Math.min(...msgs.messages.map((m) => m.date)) : 0;
   // wiadomości na górze listy pobieramy z góry, więc otwierają się natychmiast
@@ -175,7 +177,7 @@ async function viewInbox() {
   const ch = $('.chips .chip[aria-pressed=true]'); if (ch) ch.parentElement.scrollLeft = Math.max(0, ch.offsetLeft - 40);
 }
 
-const FOLDER_NAME = { offers: 'Oferty', spam: 'Spam', trash: 'Kosz', sent: 'Wysłane', drafts: 'Szkice' };
+const FOLDER_NAME = { offers: 'Oferty', spam: 'Spam', trash: 'Kosz', sent: 'Wysłane', drafts: 'Szkice', archive: 'Archiwum', starred: 'Oznaczone', other: 'Folder' };
 function moreHtml(m) {
   if (!m.messages.length || S.filter === 'snoozed') return '';
   return `<div class="morew" id="morew"><button class="btn" data-act="more">${ic('down', 'i18')}Wczytaj starsze</button></div>`;
@@ -183,8 +185,7 @@ function moreHtml(m) {
 async function loadMore(btn) {
   const list = $('.list'); if (!list) return; btn.disabled = true; btn.lastChild.textContent = 'Wczytuję…';
   const q = new URLSearchParams({ tab: S.seg === 'msg' ? S.filter : 'all', limit: '60' }); if (S.account) q.set('account', S.account);
-  
-  
+  if (S.filter === 'other' && S.otherFolder) { q.set('folder', S.otherFolder.key); q.set('account', S.otherFolder.acc); }
   const fetchPage = async (before) => { const p = new URLSearchParams(q); if (before) p.set('before', before); return get('/api/messages?' + p); };
   let r = await fetchPage(S.oldest);
   if (!r.messages.length && ['all', 'unread', 'offers', 'spam'].includes(S.filter)) { const h = await post('/api/history', { account_id: S.account || 0 }); if (h.added) r = await fetchPage(S.oldest); else if (!h.left) { toast('To wszystkie wiadomości'); btn.parentElement.remove(); return; } }
@@ -194,7 +195,7 @@ async function loadMore(btn) {
 }
 function chipsHtml(c = {}) {
   const k = (id, l, n, cls = '') => `<button class="chip ${cls}" data-filter="${id}" aria-pressed="${S.filter === id}">${l}${n ? `<b class="cn mono" id="cnt-${id}">${n}</b>` : ''}</button>`;
-  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + k('sent', 'Wysłane') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '');
+  return k('all', 'Skrzynka') + k('unread', 'Nieprzeczytane') + k('action', 'Do działania') + k('dates', 'Terminy') + k('offers', 'Oferty', c.offers) + k('spam', 'Spam', c.spam) + k('snoozed', 'Odłożone', c.snoozed) + (c.starred ? k('starred', 'Oznaczone', c.starred) : '') + k('sent', 'Wysłane') + (c.drafts ? k('drafts', 'Szkice', c.drafts) : '') + (c.archive ? k('archive', 'Archiwum', c.archive) : '') + (c.trash ? k('trash', 'Kosz', c.trash) : '') + (S.otherFolder ? k('other', esc(S.otherFolder.name)) : '') + `<button class="chip" data-act="folders">Foldery…</button>`;
 }
 function bulkHtml(m) {
   const f = S.filter, n = (m.counts || {})[f];
@@ -248,6 +249,7 @@ function orgSheet(m) {
   const row = (act, ico, t, sub, scope = '') => `<button class="org" data-orgact="${act}" data-orgid="${m.id}" ${scope ? `data-scope="${scope}"` : ''}><span class="oi">${ic(ico, 'i18')}</span><span><b>${t}</b><small>${sub}</small></span></button>`;
   sheet(`<div class="sheet-b"><h2 class="ser" style="font-size:28px;margin:6px 0 2px">Co zrobić z tym nadawcą?</h2><p style="color:var(--ink2);margin:0 0 8px;font-size:14px;word-break:break-all">${esc(m.from_name || '')} · ${esc(m.from_addr)}</p>
     ${row('delete', 'trash', 'Usuń', 'Tylko ta wiadomość. Możesz cofnąć.')}
+    ${m.cat !== 'archive' && (m.folder || 'INBOX') === 'INBOX' ? row('archive', 'inbox2', 'Archiwizuj', 'Znika ze skrzynki, zostaje w Archiwum. Możesz cofnąć.') : ''}
     ${m.cat !== 'spam' ? row('spam', 'shield', 'To spam', 'Ta i każda kolejna od tego nadawcy trafi do Spamu.') : ''}
     ${m.cat !== 'offers' ? row('offers', 'tag', 'To oferta lub newsletter', 'Kolejne wiadomości trafią do Ofert, bez powiadomień.') : ''}
     ${m.cat !== 'inbox' ? row('inbox', 'inbox2', 'Zostaw w skrzynce', 'Ten nadawca będzie już zawsze w skrzynce.') : ''}
@@ -255,17 +257,18 @@ function orgSheet(m) {
     ${dom && !freemail.test(dom) ? row('block', 'ban', `Zablokuj całą domenę @${esc(dom)}`, 'Wszystkie adresy tej firmy znikają na stałe.', 'domain') : ''}
     <div class="actions"><button class="btn grow" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}">${ic('clock', 'i18')}Odłóż na później</button><button class="btn" data-act="close">Anuluj</button></div></div>`);
 }
-const ORG_MSG = { delete: 'Usunięto', spam: 'Przeniesiono do Spamu · nadawca już zawsze tam trafi', offers: 'Przeniesiono do Ofert', inbox: 'Wróciło do skrzynki', block: 'Nadawca zablokowany · nie pokaże się nigdzie' };
+const ORG_MSG = { archive: 'Zarchiwizowano', unrule: 'Przywrócono', unarchive: 'Wróciło do skrzynki', star: 'Oznaczono', unstar: 'Usunięto oznaczenie', delete: 'Usunięto', spam: 'Przeniesiono do Spamu · nadawca już zawsze tam trafi', offers: 'Przeniesiono do Ofert', inbox: 'Wróciło do skrzynki', block: 'Nadawca zablokowany · nie pokaże się nigdzie' };
 async function orgDo(ids, action, scope, { after } = {}) {
   const r = await actMsgs(ids, action, scope); closeSheet();
-  const undo = action === 'delete' || action === 'spam' || action === 'offers' || action === 'block' ? { label: 'Cofnij', fn: async () => { await restoreMsgs(r.ids, action); toast('Przywrócono'); route(); } } : null;
+  const undo = action === 'delete' || action === 'archive' || action === 'spam' || action === 'offers' || action === 'block' ? { label: 'Cofnij', fn: async () => { await restoreMsgs(r.ids, action); toast('Przywrócono'); route(); } } : null;
   toast(`${ORG_MSG[action]}${r.count > 1 ? ` (${r.count})` : ''}`, undo);
   return r;
 }
 // Cofnięcie: usunięte wracają z kosza, spam/oferty/blokada wracają do skrzynki razem z usunięciem reguły
 async function restoreMsgs(ids, action) {
   if (action === 'delete') return actMsgs(ids, 'restore');
-  const r = await actMsgs(ids, 'inbox'); // reguła "zostaw w skrzynce" nadpisuje poprzednią
+  if (action === 'archive') return actMsgs(ids, 'unarchive');
+  const r = await actMsgs(ids, 'unrule'); // usuwa regułę nadawcy i oddaje wiadomości do skrzynki
   return r;
 }
 
@@ -324,7 +327,7 @@ async function viewMessage(id) {
   const linkify = (t) => esc(clean(t)).replace(/(https?:\/\/[^\s<]+)/g, (u) => { const h = u.replace(/&amp;/g, '&'); let host = ''; try { host = new URL(h).host; } catch { return u; } return `<a href="${esc(h)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(host)}">${esc(host)}${esc(h.length > host.length + 8 ? '/…' : '')}</a>`; });
   paint(`<div class="thread-h"><button class="back" data-go="#/" aria-label="Wróć do skrzynki">${ic('back')}Skrzynka</button>${own ? `<span style="display:flex;gap:8px"><button class="round gl" data-orgact="delete" data-orgid="${m.id}" aria-label="Usuń">${ic('trash')}</button><button class="round gl" data-reply="${m.id}" aria-label="${m.cat === 'drafts' ? 'Edytuj i wyślij' : 'Napisz ponownie'}">${ic(m.cat === 'drafts' ? 'pen' : 'send')}</button></span>` : `<span style="display:flex;gap:8px"><button class="round gl" data-org="${m.id}" aria-label="Porządkowanie: usuń, spam, zablokuj">${ic('more')}</button><button class="round gl" data-snooze="${m.id}" data-until="${m.snoozed_until || ''}" aria-label="Odłóż na później">${ic('clock')}</button><button class="round gl" data-reply="${m.id}" aria-label="Odpowiedz">${ic('send')}</button></span>`}</div>
     <h1 class="subject">${esc(m.subject)}</h1>
-    <div class="meta"><div class="a ${hue(own ? m.to_addr : m.from_addr)}">${esc(initials(own ? m.to_addr : m.from_name))}</div><div class="w"><div class="n">${own ? `Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</div><div class="d mono">${own ? `z ${esc(m.account_email)}` : esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div></div>
+    <div class="meta"><div class="a ${hue(own ? m.to_addr : m.from_addr)}">${esc(initials(own ? m.to_addr : m.from_name))}</div><div class="w"><div class="n">${own ? `Do: ${esc(m.to_addr || '(brak adresata)')}` : esc(m.from_name || m.from_addr)}</div><div class="d mono">${own ? `z ${esc(m.account_email)}` : esc(m.from_addr)} · ${d.getDate()}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}</div></div><button class="round gl star" data-star="${m.id}" aria-pressed="${!!m.starred}" aria-label="Oznacz gwiazdką">${ic('star', m.starred ? 'on' : '')}</button></div>
     ${m.cat && m.cat !== 'inbox' && !risky ? `<div class="fbanner gl"><div><b>${FOLDER_NAME[m.cat] || 'Poza skrzynką'}</b>${m.cat_why ? ` · ${esc(m.cat_why)}` : ''}</div><button class="btn" data-orgact="inbox" data-orgid="${m.id}">To nie ${m.cat === 'spam' ? 'spam' : 'oferta'}</button></div>` : ''}
     ${risky ? `<div class="risk"><h3>${ic('shield')}Prawdopodobne oszustwo</h3><ul>${m.risk_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul><div class="actions"><button class="btn warn grow" data-act="back">Wróć do skrzynki</button><button class="btn" data-act="reveal">Pokaż mimo to</button></div></div>` : ''}
     ${items.filter((i) => i.status !== 'dismissed').map((it, k) => `<div class="card gl" style="--i:${k + 1}"><div class="k mono">${ic('spark', 'i14')}Wykryto · ${KIND_LABEL[it.kind]}${it.status === 'added' ? ' · dodane' : ''}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>${it.evidence ? `<div class="ev">„${esc(it.evidence)}"</div>` : ''}<div class="actions">${it.status === 'added' ? `<button class="btn grow" data-cal="${it.id}">${ic('check', 'i18')}Dodane · pokaż ponownie</button>` : `<button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button>`}</div></div>`).join('')}
@@ -332,7 +335,9 @@ async function viewMessage(id) {
     ${framed ? `<div class="mseg gl" role="group" aria-label="Widok wiadomości"><button data-mode="html" aria-pressed="${html}">Oryginał</button><button data-mode="text" aria-pressed="${!html}">Tekst</button></div>` : ''}
     ${html && m.images_blocked ? `<div class="fbanner gl"><div>Obrazki są wyłączone.</div><button class="btn" data-act="showimg" data-id="${m.id}">Pokaż obrazki</button></div>` : ''}
     ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${linkify(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
-      : `<div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`}`, { tabs: false });
+      : `<div class="body ${risky ? 'dim' : ''}" id="body">${linkify(m.body)}</div>`}
+    <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('send', 'i18')}Odpowiedz</button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">Odpowiedz wszystkim</button>` : ''}<button class="btn" data-cmp="forward">Przekaż dalej</button></div>
+    ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(String(t.to_addr || '').split(',')[0]) : esc(t.from_name || t.from_addr)} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
   S.cur = { m, items };
   if (html) mountFrame(m.frame);
   else if (m.html_pending && (cacheGet('mode') || 'html') !== 'text') {
@@ -374,10 +379,29 @@ async function viewAccounts() {
     <div class="sec">Powiadomienia</div><div id="pushcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Porządek w poczcie</div><div id="orgcard" class="card gl" style="margin-top:6px"></div>
     <div class="sec">Prywatność</div><div class="card gl" style="margin-top:6px"><div class="k mono" style="color:var(--ok)">${ic('shield', 'i14')}Twoje dane zostają u Ciebie</div><div class="wh" style="line-height:21px;margin-top:8px">Wiadomości i hasła aplikacji leżą na Twoim serwerze (hasła zaszyfrowane AES-256). Fonty i skrypty są lokalne, bez śledzenia. Wykrywanie terminów działa na serwerze, bez wysyłania treści do żadnej firmy.</div></div>
+    <div class="sec">Podpis w wiadomościach</div><div class="card gl" style="margin-top:6px"><textarea class="in" id="sigtxt" rows="3" maxlength="600" placeholder="np. Pozdrawiam, Michał"></textarea><div class="actions"><button class="btn grow" data-act="savesig">Zapisz podpis</button></div></div>
     ${S.user.plan === 'owner' ? '<div class="sec">Osoby</div><div id="peoplecard" class="card gl" style="margin-top:6px"></div>' : ''}<div class="sec">Konto</div><div class="card gl" style="margin-top:6px"><div class="kv"><span>Zalogowano jako</span><span>${esc(S.user.email)}</span></div><div class="actions"><button class="btn warn grow" data-act="logout">Wyloguj</button></div></div>`);
   nav('accounts'); renderPushCard(); renderOrgCard(); renderPeople();
+  get('/api/compose').then((r) => { S.sig = r.signature || ''; const t = $('#sigtxt'); if (t) t.value = S.sig; }).catch(() => {});
 }
 
+async function foldersSheet() {
+  const imaps = S.accounts.filter((a) => a.provider === 'imap');
+  if (!imaps.length) { toast('Foldery są dostępne dla skrzynek IMAP'); return; }
+  const acc = (S.account && imaps.find((a) => a.id === S.account)) || imaps[0];
+  const sh = sheet(`<h2>Foldery · ${esc(acc.label)}</h2><div id="fl" class="wh" style="margin:6px 0">Wczytuję listę…</div>${imaps.length > 1 ? `<div class="actions" style="flex-wrap:wrap">${imaps.map((a) => `<button class="btn ${a.id === acc.id ? 'pri' : ''}" data-fswitch="${a.id}">${esc(a.label)}</button>`).join('')}</div>` : ''}`);
+  sh.addEventListener('click', (e) => { const b = e.target.closest('[data-fswitch]'); if (b) { S.account = +b.dataset.fswitch; foldersSheet(); } });
+  try {
+    const r = await get(`/api/provider-folders?account=${acc.id}`);
+    if (!$('#fl')) return;
+    $('#fl').outerHTML = `<div class="flist">${r.folders.map((f) => `<button class="org" data-fopen="${esc(f.path)}" data-facc="${acc.id}"><span class="oi">${ic('inbox2', 'i18')}</span><span><b>${esc(f.name)}</b><small>${esc(f.path)}</small></span></button>`).join('')}</div>`;
+  } catch (e) { if ($('#fl')) $('#fl').textContent = e.message; }
+}
+async function openProviderFolder(accId, path) {
+  closeSheet(); toast('Otwieram folder…');
+  try { const r = await post('/api/provider-folders/open', { account_id: accId, path }); S.otherFolder = { key: r.folder, acc: accId, name: path.split('/').pop() }; S.filter = 'other'; S.seg = 'msg'; go('#/'); route(); }
+  catch (e) { toast(e.message); }
+}
 const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 function attHtml(m) {
   if (!m.attachments?.length) return '';
@@ -489,17 +513,66 @@ async function addAccSheet() {
     };
   });
 }
-function composeSheet(reply) {
-  const accs = S.accounts.filter((a) => true);
-  const m = reply?.m, own = m && (m.cat === 'sent' || m.cat === 'drafts');
-  const quoted = own ? (m.cat === 'drafts' ? m.body : '') : m ? `\n\n\nW dniu ${new Date(m.date).toLocaleDateString('pl-PL')} ${m.from_name || m.from_addr} napisał(a):\n${m.body.split('\n').slice(0, 30).map((l) => '> ' + l).join('\n')}` : '';
-  sheet(`<h2>${own ? (m.cat === 'drafts' ? 'Szkic' : 'Nowa wiadomość') : m ? 'Odpowiedz' : 'Nowa wiadomość'}</h2><form id="cf"><div class="fld"><label for="cfr">Z konta</label><select class="in" id="cfr">${accs.map((a) => `<option value="${a.id}" ${m && m.account_id === a.id ? 'selected' : ''}>${esc(a.email)}</option>`).join('')}</select></div>
-    <div class="fld"><label for="cto">Do</label><input class="in" id="cto" type="email" multiple required autocapitalize="off" value="${esc(own ? m.to_addr : m ? m.from_addr : '')}"></div><div class="fld"><label for="csu">Temat</label><input class="in" id="csu" value="${esc(own ? m.subject : m ? (/^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject) : '')}"></div>
-    <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" required>${esc(quoted)}</textarea></div><div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${ic('send', 'i18')}Wyślij</button></form>`, (sh) => {
-    const ta = $('#ctx', sh); ta.setSelectionRange(0, 0); setTimeout(() => ta.focus(), 450);
+// Kompozytor: nowa / odpowiedź / odpowiedź wszystkim / przekaż dalej / edycja szkicu / ponowna wysyłka.
+const fmtDT = (d) => new Date(d).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' });
+async function composeSheet(opts = {}) {
+  const { mode = 'new', m } = opts;
+  if (!S.accounts?.length) await loadAccounts(true);
+  const accs = S.accounts || [];
+  if (!accs.length) { toast('Najpierw dodaj skrzynkę'); return; }
+  if (S.sig === undefined) { try { S.sig = (await get('/api/compose')).signature || ''; } catch { S.sig = ''; } }
+  const mine = new Set(accs.map((a) => a.email.toLowerCase()));
+  const uniq = (l) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
+  const split = (v) => String(v || '').split(/[,;]\s*/);
+  let to = '', cc = '', subject = '', text = '', inReply = '', refs = '', fwd = 0, draftId = 0, accId = m?.account_id || S.account || accs[0].id;
+  const sig = S.sig ? `\n\n-- \n${S.sig}` : '';
+  if (mode === 'reply' || mode === 'replyall') {
+    to = m.from_addr; subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`; inReply = m.message_id || ''; refs = uniq([m.refs, m.message_id].filter(Boolean)).join(' ');
+    if (mode === 'replyall') cc = uniq([...split(m.to_addr), ...split(m.cc_addr)]).filter((x) => !mine.has(x.toLowerCase()) && x.toLowerCase() !== String(m.from_addr).toLowerCase()).join(', ');
+    text = `${sig}\n\nW dniu ${fmtDT(m.date)} ${m.from_name || m.from_addr} napisał(a):\n${String(m.body || '').split('\n').slice(0, 40).map((l) => '> ' + l).join('\n')}`;
+  } else if (mode === 'forward') {
+    subject = /^(fwd?|pd):/i.test(m.subject) ? m.subject : `Fwd: ${m.subject}`; fwd = m.id;
+    text = `${sig}\n\n---------- Przekazana wiadomość ----------\nOd: ${m.from_name ? m.from_name + ' ' : ''}<${m.from_addr}>\nData: ${fmtDT(m.date)}\nTemat: ${m.subject}\nDo: ${m.to_addr}\n\n${m.body || ''}`;
+  } else if (mode === 'draft') {
+    to = m.to_addr || ''; cc = m.cc_addr || ''; subject = m.subject || ''; text = m.body || ''; draftId = m.id;
+  } else if (mode === 'again') { to = m.to_addr || ''; cc = m.cc_addr || ''; subject = m.subject || ''; text = m.body || ''; }
+  else text = sig;
+  const files = [];
+  const title = { new: 'Nowa wiadomość', reply: 'Odpowiedz', replyall: 'Odpowiedz wszystkim', forward: 'Przekaż dalej', draft: 'Szkic', again: 'Nowa wiadomość' }[mode];
+  const total = () => files.reduce((n, f) => n + f.size, 0);
+  sheet(`<h2>${title}</h2><form id="cf"><div class="fld"><label for="cfr">Z konta</label><select class="in" id="cfr">${accs.map((a) => `<option value="${a.id}" ${accId === a.id ? 'selected' : ''}>${esc(a.email)}</option>`).join('')}</select></div>
+    <div class="fld"><label for="cto">Do</label><input class="in" id="cto" type="text" inputmode="email" autocomplete="off" autocapitalize="off" value="${esc(to)}" placeholder="adres, adres"></div>
+    <div id="ccbox" ${cc ? '' : 'hidden'}><div class="fld"><label for="ccc">Dw</label><input class="in" id="ccc" inputmode="email" autocapitalize="off" value="${esc(cc)}"></div><div class="fld"><label for="cbc">UDW</label><input class="in" id="cbc" inputmode="email" autocapitalize="off"></div></div>
+    ${cc ? '' : '<button class="lnk" type="button" id="showcc">Dw / UDW</button>'}
+    <div class="fld"><label for="csu">Temat</label><input class="in" id="csu" value="${esc(subject)}"></div>
+    <div class="fld"><label for="ctx">Treść</label><textarea class="in" id="ctx" rows="9">${esc(text)}</textarea></div>
+    <div class="cfiles" id="cfiles"></div>
+    <div class="err" id="err" role="alert"></div>
+    <div class="actions" style="margin-top:12px"><label class="btn" style="cursor:pointer">${ic('clip', 'i18')}Załącznik<input type="file" id="cfile" multiple hidden></label><button class="btn" type="button" id="cdraft">Zapisz szkic</button><button class="btn pri grow" type="submit">${ic('send', 'i18')}Wyślij</button></div></form>`, (sh) => {
+    const ta = $('#ctx', sh); ta.setSelectionRange(0, 0); setTimeout(() => (mode === 'new' || mode === 'draft' || mode === 'again' ? $('#cto', sh) : ta).focus(), 450);
+    const paintFiles = () => { $('#cfiles', sh).innerHTML = files.map((f, i) => `<span class="cfile gl">${ic('clip', 'i14')}<span>${esc(f.name)} · ${fmtSize(f.size)}</span><button type="button" data-rmf="${i}" aria-label="Usuń załącznik">${ic('x', 'i14')}</button></span>`).join(''); };
+    $('#showcc', sh)?.addEventListener('click', (e) => { $('#ccbox', sh).hidden = false; e.currentTarget.remove(); $('#ccc', sh).focus(); });
+    $('#cfiles', sh).addEventListener('click', (e) => { const b = e.target.closest('[data-rmf]'); if (b) { files.splice(+b.dataset.rmf, 1); paintFiles(); } });
+    const readFile = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(f); });
+    $('#cfile', sh).onchange = async (e) => {
+      for (const f of e.target.files) {
+        if (total() + f.size > 10 * 1024 * 1024) { $('#err', sh).textContent = 'Załączniki mogą mieć razem do 10 MB'; break; }
+        files.push({ name: f.name, type: f.type, size: f.size, data: await readFile(f) });
+      }
+      e.target.value = ''; paintFiles();
+    };
+    // przy przekazywaniu serwer dołącza załączniki oryginału sam; pokazujemy to użytkownikowi
+    if (fwd && m.attachments?.length) $('#cfiles', sh).insertAdjacentHTML('beforebegin', `<div class="wh" style="font-size:12px;margin-top:6px">Zostaną dołączone załączniki oryginału (${m.attachments.length}).</div>`);
+    const payload = () => ({ account_id: +$('#cfr', sh).value, to: $('#cto', sh).value, cc: $('#ccc', sh).value, bcc: $('#cbc', sh).value, subject: $('#csu', sh).value, text: ta.value, in_reply_to: inReply || undefined, references: refs || undefined, forward_of: fwd || undefined, attachments: files.map(({ name, type, data }) => ({ name, type, data })) });
+    $('#cdraft', sh).onclick = async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; $('#err', sh).textContent = '';
+      try { await post('/api/drafts', { ...payload(), replace_id: draftId || undefined }); closeSheet(); toast('Zapisano szkic'); if (location.hash.startsWith('#/m/') && draftId) go('#/'); else if (S.filter === 'drafts') route(); }
+      catch (e) { $('#err', sh).textContent = e.message; b.disabled = false; }
+    };
     $('#cf', sh).onsubmit = async (ev) => {
       ev.preventDefault(); const b = ev.submitter; b.disabled = true; $('#err', sh).textContent = '';
-      try { await post('/api/send', { account_id: +$('#cfr', sh).value, to: $('#cto', sh).value, subject: $('#csu', sh).value, text: ta.value, in_reply_to: own ? undefined : m?.message_id }); if (m?.cat === 'drafts') await actMsgs([m.id], 'delete').catch(() => {}); closeSheet(); toast('Wysłano'); if (m?.cat === 'drafts') go('#/'); }
+      if (!$('#cto', sh).value.trim() && !$('#ccc', sh).value.trim() && !$('#cbc', sh).value.trim()) { $('#err', sh).textContent = 'Podaj adresata'; b.disabled = false; return; }
+      try { await post('/api/send', { ...payload(), draft_id: draftId || undefined }); closeSheet(); toast('Wysłano'); if (draftId) go('#/'); }
       catch (e) { $('#err', sh).textContent = e.message; b.disabled = false; }
     };
   });
@@ -524,7 +597,7 @@ window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true)
 
 document.addEventListener('click', async (ev) => {
   if (Date.now() - (S.swiped || 0) < 450) return;
-  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-done],[data-tab]');
+  const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab]');
   if (!el) return; const d = el.dataset;
   try {
     if (d.open) go(`#/m/${d.open}`);
@@ -535,7 +608,13 @@ document.addEventListener('click', async (ev) => {
     else if (d.cal) { const it = await findItem(+d.cal); calSheet(it); }
     else if (d.done) { post(`/api/items/${d.done}`, { status: 'added' }).then(() => setTimeout(route, 600)); closeSheet(); }
     else if (d.dismiss) { await post(`/api/items/${d.dismiss}`, { status: 'dismissed' }); toast('Pominięto'); route(); }
-    else if (d.reply) composeSheet(S.cur);
+    else if (d.reply) composeSheet({ mode: S.cur.m.cat === 'drafts' ? 'draft' : S.cur.m.cat === 'sent' ? 'again' : 'reply', m: S.cur.m });
+    else if (d.cmp) composeSheet({ mode: d.cmp, m: S.cur.m });
+    else if (d.star) { const on = !S.cur.m.starred; await actMsgs([+d.star], on ? 'star' : 'unstar'); S.cur.m.starred = on; el.setAttribute('aria-pressed', on); el.innerHTML = ic('star', on ? 'on' : ''); }
+    else if (d.thr) go(`#/m/${d.thr}`);
+    else if (d.fopen) await openProviderFolder(+d.facc, d.fopen);
+    else if (d.act === 'folders') foldersSheet();
+    else if (d.act === 'savesig') { const r = await post('/api/compose', { signature: $('#sigtxt').value }); S.sig = r.signature; toast('Podpis zapisany'); }
     else if (d.sync) { el.disabled = true; toast('Synchronizuję…'); await post(`/api/accounts/${d.sync}/sync`); toast('Gotowe'); route(); }
     else if (d.rm) { if (confirm('Usunąć to konto i pobrane z niego wiadomości z Poczty? Skrzynka u dostawcy zostaje nietknięta.')) { await api('DELETE', `/api/accounts/${d.rm}`); route(); } }
     else if (d.mode) { try { localStorage.setItem('poczta.mode', JSON.stringify(d.mode)); } catch {} route(); }

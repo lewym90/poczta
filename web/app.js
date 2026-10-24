@@ -607,7 +607,7 @@ function calSheet(it) {
   const link = it.link;
   sheet(`<h2>Dodać do Kalendarza?</h2><p class="sub">Nic nie zostanie dodane, dopóki nie potwierdzisz w Kalendarzu.</p>
     <div class="kv"><span>${KIND_LABEL[it.kind]}</span><span>${esc(it.title)}</span></div><div class="kv"><span>Kiedy</span><span>${esc(whenText(it))}</span></div>${it.location ? `<div class="kv"><span>Gdzie</span><span>${esc(it.location)}</span></div>` : ''}${it.evidence ? `<div class="note">Znalezione w: „${esc(it.evidence)}"</div>` : ''}
-    <div class="actions" style="flex-direction:column"><a class="btn pri" style="text-decoration:none" href="${esc(link)}" target="_blank" rel="noopener" data-done="${it.id}">${ic('cal', 'i18')}Otwórz w moim Kalendarzu</a><a class="btn" style="text-decoration:none" href="api/items/${it.id}/ics" data-done="${it.id}">Plik .ics (kalendarz iPhone)</a><button class="btn" data-act="close">Anuluj</button></div>`);
+    <div class="actions" style="flex-direction:column"><button class="btn pri" data-x2="cal-copy" data-id="${it.id}" data-text="${esc(new URL(link, location.href).searchParams.get('text') || it.title)}">${ic('copy', 'i18')}Skopiuj do Kalendarza</button><a class="btn" style="text-decoration:none" href="api/items/${it.id}/ics" data-done="${it.id}">${ic('cal', 'i18')}Plik .ics (kalendarz iPhone)</a><button class="btn" data-act="close">Anuluj</button></div><p class="sub" style="margin-top:10px">Skopiuj, otwórz Kalendarz z ekranu początkowego, wybierz „Dodaj zdaniem” i wklej. Odnośnik otwierałby Safari, które ma osobne dane.</p>`);
 }
 function accMenu() {
   sheet(`<h2>Konta</h2><div class="actions" style="flex-direction:column"><button class="btn ${S.account ? '' : 'pri'}" data-pick="0">Wszystkie konta</button>${S.accounts.map((a) => `<button class="btn ${S.account === a.id ? 'pri' : ''}" data-pick="${a.id}">${esc(a.label)} · ${esc(a.email)}</button>`).join('')}</div>`);
@@ -1124,7 +1124,10 @@ function threadNav(m) {
 })();
 async function x2(a, el) {
   const d = el.dataset;
-  if (a === 'ar-new') autoRuleSheet();
+  if (a === 'cal-copy') {
+    try { await navigator.clipboard.writeText(d.text); } catch { const t = document.createElement('textarea'); t.value = d.text; document.body.append(t); t.select(); try { document.execCommand('copy'); } catch {} t.remove(); }
+    post(`/api/items/${d.id}`, { status: 'added' }).then(() => setTimeout(route, 600)); closeSheet(); toast('Skopiowano. Wklej w Kalendarzu: Dodaj zdaniem');
+  } else if (a === 'ar-new') autoRuleSheet();
   else if (a === 'ar-from') { const m = S.cur.m; autoRuleSheet({ field: 'from', value: m.from_addr, action: 'archive' }); }
   else if (a === 'ar-del') { await api('DELETE', `/api/auto-rules/${d.id}`); renderTools(); }
   else if (a === 'tp-edit') templateSheet(d.id);

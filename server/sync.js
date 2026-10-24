@@ -63,7 +63,10 @@ export function backfillThreads() {
   return rows.length;
 }
 
-export function storeMessages(acc, messages) {
+// Wiadomości z folderu Niechciane u dostawcy: kody logowania i potwierdzenia trafiają do skrzynki (to je dostawca myli ze spamem), reszta do Spamu bez powiadomień.
+const RESCUE = /(\bkod\b|\bcode\b|one[- ]time|\botp\b|verif|weryfik|secure link|sign[- ]?in|log[- ]?in|logowan|zaloguj|has[łl]|password|reset|potwierdz|confirm|2fa|authenticat|autoryzac|security|bezpiecze|przelew|p[łl]atno|faktur|paczk|kurier|zam[óo]wieni)/i;
+export const rescuable = (m) => RESCUE.test(`${m.subject || ''} ${(m.snippet || '').slice(0, 160)}`);
+export function storeMessages(acc, messages, { folder = 'INBOX', junk = false } = {}) {
   const insM = db.prepare(`INSERT OR IGNORE INTO messages(user_id,account_id,folder,uid,message_id,from_name,from_addr,to_addr,subject,snippet,body,date,unread,has_attach,risk,risk_reasons,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const insF = db.prepare('INSERT INTO messages_fts(rowid,subject,from_text,body) VALUES(?,?,?,?)');
@@ -75,10 +78,11 @@ export function storeMessages(acc, messages) {
     for (const m of messages) {
       const risk = assessRisk(m);
       let sorted = classify({ ...m, risk: risk.risk }, rules);
+      if (junk) sorted = rescuable(m) && sorted.cat !== 'blocked' ? { cat: 'inbox', by: 'auto', why: 'Dostawca uznał to za spam, ale wygląda na kod lub potwierdzenie' } : { cat: sorted.cat === 'blocked' ? 'blocked' : 'spam', by: 'auto', why: 'Folder Niechciane u dostawcy' };
       const ar = sorted.cat === 'inbox' ? matchAuto(autoRules, m) : null;
       if (ar && autoCat(ar)) sorted = { cat: autoCat(ar), by: 'rule', why: 'Twoja reguła' };
       const blocked = sorted.cat === 'blocked';
-      const r = insM.run(acc.user_id, acc.id, 'INBOX', m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread && !blocked && ar?.action !== 'read' ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
+      const r = insM.run(acc.user_id, acc.id, folder, m.uid, m.messageId, m.fromName, m.fromAddr, m.toAddr, m.subject, m.snippet, m.body, m.date, m.unread && !blocked && !(junk && sorted.cat === 'spam') && ar?.action !== 'read' ? 1 : 0, m.hasAttach ? 1 : 0, risk.risk, risk.reasons.length ? JSON.stringify(risk.reasons) : null, Date.now());
       if (!r.changes) continue;
       added++;
       const id = Number(r.lastInsertRowid);
@@ -132,7 +136,7 @@ export async function backfillHtml(accId) {
 
 // Wysłane i Szkice: osobne foldery u dostawcy. Ścieżki wykrywamy raz (folder_state), potem synchronizujemy co najwyżej co 90 s.
 export const folderPath = (accId, folder) => (folder === 'INBOX' ? 'INBOX' : folder.startsWith('X:') ? folder.slice(2) : db.prepare('SELECT path FROM folder_state WHERE account_id=? AND folder=?').get(accId, folder)?.path || 'INBOX__brak');
-const FOLDER_DEF = { SENT: { cat: 'sent', first: 40 }, DRAFTS: { cat: 'drafts', first: 30 } };
+const FOLDER_DEF = { SENT: { cat: 'sent', first: 40 }, DRAFTS: { cat: 'drafts', first: 30 }, SPAM: { cat: 'spam', first: 30 } };
 function storeFolder(acc, folder, messages, catOverride) {
   const cat = catOverride || FOLDER_DEF[folder].cat;
   const ins = db.prepare(`INSERT OR IGNORE INTO messages(user_id,account_id,folder,uid,message_id,from_name,from_addr,to_addr,subject,snippet,body,date,unread,has_attach,cat,cat_by,att_try,html_try,created_at)
@@ -175,11 +179,23 @@ export async function syncFolders(accId, { force = false } = {}) {
       put.run(accId, 'SENT', sp.sent || ''); put.run(accId, 'DRAFTS', sp.drafts || '');
       st = db.prepare('SELECT * FROM folder_state WHERE account_id=?').all(accId);
     }
+    if (!st.some((f) => f.folder === 'SPAM')) { // konta dodane wcześniej: dopisz folder Niechciane
+      const sp = await imap.listSpecial(cfg, secret);
+      db.prepare('INSERT OR IGNORE INTO folder_state(account_id,folder,path,last_uid) VALUES(?,?,?,0)').run(accId, 'SPAM', sp.junk || '');
+      st = db.prepare('SELECT * FROM folder_state WHERE account_id=?').all(accId);
+    }
     let added = 0;
     for (const f of st) {
       if (!f.path || !FOLDER_DEF[f.folder] || (!force && f.synced_at && Date.now() - f.synced_at < 90e3)) continue;
       try {
-        if (f.folder === 'SENT') {
+        if (f.folder === 'SPAM') {
+          const first = !f.last_uid; // pierwszy raz: tylko wpisujemy zakładkę, bez zalewu starym spamem
+          const res = await imap.sync(cfg, secret, { lastUid: f.last_uid, first: first ? 15 : 30, path: f.path });
+          const r = storeMessages(acc, first ? res.messages.filter((m) => m.date > Date.now() - 3 * 864e5) : res.messages, { folder: 'SPAM', junk: true });
+          added += r.added;
+          if (!first && r.fresh.length) notifyNewMessages(acc.user_id, r.fresh).catch(() => {});
+          db.prepare('UPDATE folder_state SET last_uid=?, synced_at=? WHERE account_id=? AND folder=?').run(res.lastUid || f.last_uid || 1, Date.now(), accId, 'SPAM');
+        } else if (f.folder === 'SENT') {
           const res = await imap.sync(cfg, secret, { lastUid: f.last_uid, first: FOLDER_DEF.SENT.first, path: f.path });
           added += storeFolder(acc, 'SENT', res.messages);
           db.prepare('UPDATE folder_state SET last_uid=?, synced_at=? WHERE account_id=? AND folder=?').run(res.lastUid || f.last_uid, Date.now(), accId, 'SENT');

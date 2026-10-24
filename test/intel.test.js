@@ -34,7 +34,7 @@ test('faktura → termin z kwotą', () => {
   assert.equal(items[0].kind, 'deadline'); assert.equal(items[0].starts_at, '2026-11-04'); assert.equal(items[0].amount, 1240);
 });
 test('przesyłka dziś w oknie godzin', () => {
-  const [it] = extractItems({ subject: 'Twoja paczka dotrze dziś', body: 'Kurier doręczy przesyłkę dziś w godzinach 14–16.', fromName: 'Kurier Express' }, NOW);
+  const [it] = extractItems({ subject: 'Twoja paczka dotrze dziś', body: 'Kurier doręczy przesyłkę dziś w godzinach 14–16.', fromName: 'Kurier Express', received: NOW }, NOW);
   assert.equal(it.kind, 'parcel'); assert.equal(it.starts_at, '2026-10-23T14:00'); assert.equal(it.ends_at, '2026-10-23T16:00');
 });
 test('wizyta', () => {

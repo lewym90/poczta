@@ -159,7 +159,7 @@ export const imap = {
       await c.connect();
       const boxes = await c.list();
       const find = (use, re) => (boxes.find((b) => b.specialUse === use) || boxes.find((b) => re.test(b.path) || re.test(b.name)))?.path || '';
-      return { sent: find('\\Sent', /^(\[gmail\]\/)?(sent( mail| items| messages)?|wys[łl]ane|elementy wys[łl]ane)$/i), drafts: find('\\Drafts', /^(\[gmail\]\/)?(drafts?|szkice|wersje robocze)$/i) };
+      return { sent: find('\\Sent', /^(\[gmail\]\/)?(sent( mail| items| messages)?|wys[łl]ane|elementy wys[łl]ane)$/i), drafts: find('\\Drafts', /^(\[gmail\]\/)?(drafts?|szkice|wersje robocze)$/i), junk: find('\\Junk', /^(\[gmail\]\/)?(spam|junk( e-?mail)?|niechciane|bulk mail|wiadomo[śs]ci[- ]śmieci)$/i) };
     } finally { await c.logout().catch(() => {}); }
   },
   async trash(cfg, pass, uids, path = 'INBOX') {

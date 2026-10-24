@@ -657,3 +657,14 @@ test('lista zwraca znacznik more, gdy są starsze wiadomości', async () => {
   const r = (await api('GET', '/api/messages?limit=2')).body; assert.equal(r.messages.length, 2); assert.equal(r.more, true);
   assert.equal((await api('GET', '/api/messages?limit=100')).body.more, false);
 });
+
+test('folder Niechciane dostawcy: kod logowania trafia do skrzynki, reszta do Spamu', async () => {
+  const { db } = await import('../server/db.js'); const { storeMessages, rescuable } = await import('../server/sync.js');
+  assert.ok(rescuable({ subject: 'Your secure link to Claude is here' })); assert.ok(rescuable({ subject: 'Twój kod weryfikacyjny' })); assert.ok(!rescuable({ subject: 'Wielka wyprzedaż' }));
+  const acc = db.prepare('SELECT id,user_id FROM accounts WHERE provider=? ORDER BY id LIMIT 1').get('demo');
+  const mk = (n, o) => ({ uid: 9800 + n, messageId: `<j${n}@t>`, fromName: 'X', fromAddr: `j${n}@example.org`, toAddr: 'ty@example.com', subject: 'T', body: 'x', snippet: 'x', date: Date.now(), unread: true, hasAttach: false, ics: [], atts: [], html: '', unsub: false, bulk: false, ...o });
+  const r = storeMessages(acc, [mk(1, { subject: 'Sign in to Claude' }), mk(2, { subject: 'Tanie okna' })], { folder: 'SPAM', junk: true });
+  assert.equal(r.fresh.length, 1);
+  const row = (u) => db.prepare('SELECT cat,unread,folder FROM messages WHERE uid=?').get(u);
+  assert.deepEqual({ ...row(9801) }, { cat: 'inbox', unread: 1, folder: 'SPAM' }); assert.deepEqual({ ...row(9802) }, { cat: 'spam', unread: 0, folder: 'SPAM' });
+});

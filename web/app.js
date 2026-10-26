@@ -437,7 +437,7 @@ async function viewSearch() {
   nav('search');
   const q = $('#q'); let t, seq = 0, saved = [];
   const aRow = (a, i) => { const view = /^(image\/(png|jpe?g|gif|webp|avif)|application\/pdf)$/i.test(a.ctype);
-    return `<div class="arow gl" style="--i:${i}"><a class="am" href="api/messages/${a.mid}/att/${a.idx}${view ? '?view=1' : ''}" ${view ? 'target="_blank" rel="noopener"' : `download="${esc(a.filename)}"`}>${ic(view ? 'file' : 'clip', 'i18')}<span class="an"><b>${esc(a.filename)}</b><i class="mono">${fmtSize(a.size)} · ${a.cat === 'sent' ? 'do ' + esc(toNames(a.to_addr)) : 'od ' + esc(dispName(a.from_addr, a.from_name))} · ${fmtTime(a.date)}</i></span></a><button class="btn" data-open="${a.mid}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button></div>`; };
+    return `<div class="arow gl" style="--i:${i}"><a class="am" href="api/messages/${a.mid}/att/${a.idx}${view ? '?view=1' : ''}" ${view ? 'target="_blank" rel="noopener"' : `download="${esc(a.filename)}" data-dl="api/messages/${a.mid}/att/${a.idx}" data-fn="${esc(a.filename)}"`}>${ic(view ? 'file' : 'clip', 'i18')}<span class="an"><b>${esc(a.filename)}</b><i class="mono">${fmtSize(a.size)} · ${a.cat === 'sent' ? 'do ' + esc(toNames(a.to_addr)) : 'od ' + esc(dispName(a.from_addr, a.from_name))} · ${fmtTime(a.date)}</i></span></a><button class="btn" data-open="${a.mid}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button></div>`; };
   const drawX = () => {
     $('#sx').innerHTML = att
       ? `<div class="chips">${kinds.map((k) => `<button class="chip" data-sk="${k[0]}" aria-pressed="${(S.sk || '') === k[0]}">${k[1]}</button>`).join('')}</div>`
@@ -515,7 +515,7 @@ const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1
 function attHtml(m) {
   if (!m.attachments?.length) return '';
   return `<div class="atts">${m.attachments.map((a) => { const view = /^(image\/(png|jpe?g|gif|webp|avif)|application\/pdf)$/i.test(a.ctype);
-    return `<a class="att gl" href="api/messages/${m.id}/att/${a.idx}${view ? '?view=1' : ''}" ${view ? 'target="_blank" rel="noopener"' : `download="${esc(a.filename)}"`}>${ic(view ? 'file' : 'clip', 'i18')}<span class="an"><b>${esc(a.filename)}</b><i class="mono">${fmtSize(a.size)}</i></span></a>`; }).join('')}</div>`;
+    return `<a class="att gl" href="api/messages/${m.id}/att/${a.idx}${view ? '?view=1' : ''}" ${view ? 'target="_blank" rel="noopener"' : `download="${esc(a.filename)}" data-dl="api/messages/${m.id}/att/${a.idx}" data-fn="${esc(a.filename)}"`}>${ic(view ? 'file' : 'clip', 'i18')}<span class="an"><b>${esc(a.filename)}</b><i class="mono">${fmtSize(a.size)}</i></span></a>`; }).join('')}</div>`;
 }
 
 function viewAuth() {
@@ -1162,7 +1162,22 @@ async function route() {
 }
 window.addEventListener('hashchange', () => { S.animate = true; closeSheet(true); route(); });
 
+// Pliki ZIP, Office itp.: iOS w aplikacji z ekranu początkowego ignoruje atrybut download, więc pobieramy plik i oddajemy go arkuszowi udostępniania ("Zapisz w Plikach")
+async function saveFile(url, name) {
+  toast('Pobieram plik…');
+  let file;
+  try {
+    const r = await fetch(url, { credentials: 'same-origin' }); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Nie udało się pobrać');
+    const b = await r.blob(); file = new File([b], name || 'zalacznik', { type: b.type || 'application/octet-stream' });
+  } catch (e) { toast(e.message || 'Nie udało się pobrać pliku'); return; }
+  const share = () => navigator.share({ files: [file], title: file.name });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await share(); return; } catch (e) { if (e.name === 'AbortError') return; toast('Plik gotowy', { label: 'Zapisz', fn: () => share().catch(() => {}) }); return; }
+  }
+  const u = URL.createObjectURL(file), a = document.createElement('a'); a.href = u; a.download = file.name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
 document.addEventListener('click', async (ev) => {
+  const dl = ev.target.closest('a[data-dl]'); if (dl) { ev.preventDefault(); saveFile(dl.dataset.dl, dl.dataset.fn); return; }
   if (Date.now() - (S.swiped || 0) < 450) return;
   const el = ev.target.closest('[data-open],[data-go],[data-seg],[data-filter],[data-cal],[data-dismiss],[data-act],[data-sync],[data-rm],[data-pick],[data-bell],[data-snooze],[data-snz],[data-org],[data-orgact],[data-rmrule],[data-rmuser],[data-rminv],[data-sharelink],[data-mode],[data-paid],[data-unpaid],[data-reply],[data-cmp],[data-star],[data-thr],[data-fopen],[data-done],[data-tab],[data-ea],[data-kc],[data-kp],[data-kadd],[data-kmore],[data-nudge],[data-fuoff],[data-unsub],[data-qr],[data-ck],[data-stk],[data-stkc],[data-stkmore],[data-x2]');
   if (!el) return; const d = el.dataset;

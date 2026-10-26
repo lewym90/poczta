@@ -171,6 +171,7 @@ textarea.in{min-height:150px;resize:vertical;line-height:23px}
 .btn.snz{width:100%;display:flex;justify-content:space-between;align-items:center;margin-top:8px;height:54px}.btn.snz small{color:var(--ink2);font-size:12.5px}
 .card.od{border-color:rgba(255,122,122,.45)}.card.od .k{color:var(--er)}
 .amt{font-size:19px;color:var(--ink)}
+.hero.mini{padding:11px 16px;gap:10px;border-radius:22px;margin-top:8px;min-height:0}.hero.mini .t{font-size:15px;line-height:20px;font-weight:600;margin-left:auto}.hero.mini svg{color:var(--acc2);flex:none}
 .hero.pay{padding:22px 20px}.hero.pay .t{font-size:34px;line-height:38px}
 .kv.paid span:first-child{opacity:.7;text-decoration:line-through}.link{color:var(--acc2);font-size:13px;margin-left:8px}
 .cp.snz{background:rgba(61,214,245,.10);color:var(--acc2);border-color:rgba(61,214,245,.30)}

@@ -119,6 +119,9 @@ const MIGRATIONS = [
    CREATE TABLE passkeys(
      id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      cred_id TEXT NOT NULL UNIQUE, pub TEXT NOT NULL, counter INTEGER NOT NULL DEFAULT 0, name TEXT, created_at INTEGER NOT NULL);`,
+  // klucz nadawcy do stosów: adresy "Ukryj mój e-mail" Apple (privaterelay) są unikalne dla każdej wiadomości, więc łączymy je po nazwie nadawcy
+  `ALTER TABLE messages ADD COLUMN sender_key TEXT GENERATED ALWAYS AS (CASE WHEN lower(from_addr) LIKE '%@privaterelay.appleid.com' AND COALESCE(from_name,'')!='' THEN 'relay:'||lower(from_name) ELSE lower(from_addr) END) VIRTUAL;
+   CREATE INDEX msg_skey ON messages(user_id, cat, sender_key);`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

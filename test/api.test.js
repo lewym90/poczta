@@ -668,3 +668,12 @@ test('folder Niechciane dostawcy: kod logowania trafia do skrzynki, reszta do Sp
   const row = (u) => db.prepare('SELECT cat,unread,folder FROM messages WHERE uid=?').get(u);
   assert.deepEqual({ ...row(9801) }, { cat: 'inbox', unread: 1, folder: 'SPAM' }); assert.deepEqual({ ...row(9802) }, { cat: 'spam', unread: 0, folder: 'SPAM' });
 });
+
+test('stos: adresy Ukryj mój e-mail Apple łączą się po nazwie nadawcy', async () => {
+  const { db } = await import('../server/db.js'); const { storeMessages } = await import('../server/sync.js');
+  const acc = db.prepare('SELECT id,user_id FROM accounts WHERE provider=? ORDER BY id LIMIT 1').get('demo');
+  const mk = (n) => ({ uid: 9900 + n, messageId: `<r${n}@t>`, fromName: 'Anthropic', fromAddr: `no-reply-tok${n}_at_mail_anthropic_com@privaterelay.appleid.com`, toAddr: 'ty@example.com', subject: `Your secure link ${n}`, body: 'x', snippet: 'x', date: Date.now() + n * 1000, unread: true, hasAttach: false, ics: [], atts: [], html: '', unsub: false, bulk: false });
+  storeMessages(acc, [mk(1), mk(2), mk(3)]);
+  const rows = (await api('GET', '/api/messages?tab=all&limit=100')).body.messages.filter((x) => x.from_name === 'Anthropic');
+  assert.equal(rows.length, 1); assert.equal(rows[0].thread_n, 3);
+});

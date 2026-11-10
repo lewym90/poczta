@@ -19,7 +19,7 @@ import { vapidPublicKey, sendToUser, getPrefs, setPrefs } from './push.js';
 import { presetFor } from './providers/presets.js';
 import { calendarLink, buildIcs } from './calendar.js';
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const GSI = process.env.GOOGLE_CLIENT_ID ? ' https://accounts.google.com/gsi/' : '';
 const HEADERS = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
@@ -742,7 +742,7 @@ function serveStatic(req, res, pathname) {
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404, HEADERS); return res.end('Nie znaleziono'); }
     const ext = path.extname(file);
-    const immutable = ext === '.woff2' || (ext === '.png' && rel.startsWith('/icons/'));
+    const immutable = ext === '.woff2' || ((ext === '.png' || ext === '.webp') && (rel.startsWith('/icons/') || rel.startsWith('/img/')));
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : rel === '/sw.js' ? 'no-cache' : 'no-cache', ...HEADERS });
     res.end(buf);
   });

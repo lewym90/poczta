@@ -1,6 +1,6 @@
 // Service worker: powłoka aplikacji offline. Dane z API zawsze z sieci (offline czyta aplikacja z własnej pamięci).
-const V = 'poczta-v27';
-const SHELL = ['./', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const V = 'poczta-v28';
+const SHELL = ['./', 'styles.css', 'gold.css', 'theme.js', 'app.js', 'manifest.webmanifest', 'icons/zl-icon-192.png', 'icons/zl-icon-512.png', 'img/bg.webp'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {
@@ -14,7 +14,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {}; try { d = e.data.json(); } catch { d = { title: 'Poczta', body: e.data ? e.data.text() : '' }; }
   e.waitUntil(Promise.all([
-    self.registration.showNotification(d.title || 'Poczta', { body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: d.tag, renotify: false, data: { url: d.url || './' } }),
+    self.registration.showNotification(d.title || 'Poczta', { body: d.body || '', icon: 'icons/zl-icon-192.png', badge: 'icons/zl-icon-192.png', tag: d.tag, renotify: false, data: { url: d.url || './' } }),
     d.badge != null && self.navigator.setAppBadge ? (d.badge ? self.navigator.setAppBadge(d.badge) : self.navigator.clearAppBadge()).catch(() => {}) : null,
   ]));
 });

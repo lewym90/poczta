@@ -128,3 +128,13 @@ Zwinięte grupy wyglądają jak stos kart: główna karta z cienkimi warstwami w
 - **Aktualizacje automatyczne:** instalator dodaje timer `poczta-update.timer` (codziennie ok. 4:10): pobiera kod z GitHuba, instaluje, restartuje i w razie porażki wraca do poprzedniej wersji. Log: `/var/log/poczta-update.log`.
 - **Klucz dostępu (Face ID):** Konto → Logowanie kluczem dostępu, potem przycisk na ekranie logowania. Wymaga adresu HTTPS (jest). Logowanie kontem Google: ustaw `GOOGLE_CLIENT_ID` w `/etc/poczta.env` (klient OAuth typu „Web” z Google Cloud, z Twoją domeną jako dozwolonym źródłem); przycisk pojawi się na ekranie logowania, a wejść może tylko konto Google o adresie takim jak istniejący użytkownik Poczty.
 - **Widżet:** iOS nie daje aplikacjom z ekranu początkowego własnych widżetów, więc Poczta udostępnia prywatny odnośnik tylko do odczytu podsumowania (`/api/widget?token=…`) i gotowy skrypt dla darmowej aplikacji Scriptable.
+
+## Motyw „Złoto” (etap 9)
+
+- Nowa szata graficzna: czerń i szczotkowane złoto, karty ze złotym obrzeżem, złote ikony (wektorowe, z gradientem), fonty lokalne (w tym Cinzel do logo).
+- **Dziś** jako pulpit z kaflami: Poczta (nowe), Sprawy, Płatności, Paczki, Terminy i Przegląd dnia. Kafel przenosi od razu do właściwego widoku. Pod kaflami dalej „Bez odpowiedzi” i sprawy wg dni.
+- **Płatności**: złoty pierścień z kwotą do zapłaty (pierścień pokazuje, ile jeszcze zostało do zapłacenia w tym miesiącu).
+- Sprawy i płatności z kolorowym paskiem: wydarzenie (zielony), paczka (czerwony), termin płatności (złoty).
+- Animacje: wejście kart z rozmyciem, liczby odliczające do wartości, rysujący się pierścień, połysk na kaflach i przyciskach, unoszące się ilustracje, przesuwający się blask w tle, złoty pył, sprężysty dolny pasek. Przy „Ogranicz ruch” w iOS animacje są wyłączane.
+- Przełącznik **Konto → Wygląd: Złoto / Noc** (wybór zapamiętany na urządzeniu, „Noc” to dotychczasowy motyw).
+- Grafiki: `web/img/` (kafle, puste stany, tło), nowe ikony aplikacji `web/icons/zl-*`. iOS nie podmienia ikony na ekranie początkowym sam: żeby zobaczyć nową, trzeba usunąć Pocztę z ekranu i dodać ją ponownie (potem ponownie włączyć powiadomienia).

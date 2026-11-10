@@ -324,3 +324,43 @@ mark{background:rgba(255,194,102,.28);color:inherit;border-radius:4px;padding:0 
 .selbar button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 7px;color:var(--ink);background:none;border:0;font:inherit}
 .selbar small{font-size:10px;color:var(--ink2)}
 .selmode #fab{display:none}
+
+/* ---- etap 9: kafle Dziś, pierścień płatności, wygląd ---- */
+.greet{margin:14px 8px 4px;display:flex;flex-direction:column;gap:6px}
+.enter .greet,.enter .tile{animation:rise .9s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*70ms)}
+.gh{margin:0;font-family:'Sora','Instrument Sans',sans-serif;font-size:34px;line-height:40px;font-weight:700;letter-spacing:-.025em}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.tile{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;gap:10px;min-height:128px;padding:14px;border-radius:24px;text-align:left;width:100%}
+.tile.wide{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:flex-start;min-height:92px;gap:14px}
+.tile.sum{margin-top:10px}
+.tile .tic{display:flex;color:var(--acc2)}.tile .tic .ic{width:28px;height:28px;stroke-width:1.5}
+.tile .tt{position:relative;z-index:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.tile b{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.tile .tv{font-size:13.5px;color:var(--ink2)}.tile .tv i{font-style:normal;font-family:'Sora','Instrument Sans',sans-serif;font-size:20px;font-weight:700;color:var(--ink);margin-right:2px}
+.tile.wide .tv i{font-size:26px}
+.tile .tg{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:11.5px;color:var(--ink2)}
+.tile .tch{margin-left:auto;flex:none;position:relative;z-index:1;color:var(--ink2)}
+.tile .timg{display:none}
+.tile:active,.btn:active,.chip:active,.round:active,.thm:active{transform:scale(.97)}
+.tile,.btn,.chip,.round,.thm{transition:transform .18s cubic-bezier(.3,1.4,.5,1)}
+.hero.pay{flex-direction:column;align-items:center;text-align:center;gap:12px;padding:22px 18px 18px}
+.pring{position:relative;width:196px;height:196px}
+.pring svg{position:absolute;inset:0;width:100%;height:100%}
+.pf{animation:pdraw 1.9s cubic-bezier(.2,.8,.2,1) both}@keyframes pdraw{from{stroke-dashoffset:578}}
+.pc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.pc .pl{font-size:13px;color:var(--ink2)}.pc .t{font-size:30px!important;line-height:34px!important;font-weight:800;font-family:'Sora','Instrument Sans',sans-serif;letter-spacing:-.02em}.pc .pn{font-size:12.5px;color:var(--ink2)}
+.ps{font-size:13px;line-height:19px;color:var(--ink2)}.ps b{color:var(--ink)}
+.kd{position:relative}
+.racts{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.racts .btn{flex-direction:column;height:auto;padding:12px 6px;gap:6px;font-size:12px;font-weight:600}
+.themes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.thm{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;border-radius:20px;text-align:left}
+.thm b{font-size:15px}.thm small{font-size:12px;color:var(--ink2)}
+.thm[aria-pressed=true]{border-color:var(--acc2);box-shadow:0 0 0 1px var(--acc2),0 10px 28px rgba(0,0,0,.35)}
+.thm span{width:100%;height:34px;border-radius:12px;margin-bottom:8px}
+.sw-g{background:linear-gradient(120deg,#0b0907 0 45%,#E2B35A 70%,#FCE7B0 85%,#8E5C1C)}
+.sw-n{background:linear-gradient(120deg,#05070D 0 45%,#6E8BFF 70%,#3DD6F5)}
+.eimg{display:none}
+.brand{display:none}
+svg.defs{position:absolute;width:0;height:0;overflow:hidden}
+.bg .sweep,.bg .dust{display:none}

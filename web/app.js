@@ -22,6 +22,10 @@ const P = {
   star: '<path d="m12 3.800 2.600 5.300 5.800.800-4.200 4.100 1 5.800L12 17.100 6.800 19.800l1-5.800-4.200-4.100 5.800-.800z"/>',
   clip: '<path d="m19 11.500-7.200 7.200a4.500 4.500 0 0 1-6.400-6.400l8-8a3 3 0 0 1 4.200 4.200l-8 8a1.500 1.500 0 0 1-2.100-2.100l7-7"/>', file: '<path d="M7 3.500h6.500L18.500 8.500v11a1 1 0 0 1-1 1h-10.500a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z"/><path d="M13.500 3.500v5h5"/>',
   book: '<rect class="f" x="5" y="3.500" width="14" height="17" rx="2.500"/><rect x="5" y="3.500" width="14" height="17" rx="2.500"/><circle cx="12" cy="10" r="2.200"/><path d="M8.500 16.500c.5-1.800 1.900-2.700 3.500-2.700s3 .9 3.500 2.700M3 8h2M3 12h2M3 16h2"/>',
+  mail: '<rect class="f" x="3" y="5.500" width="18" height="13" rx="2.500"/><rect x="3" y="5.500" width="18" height="13" rx="2.500"/><path d="m4 7.500 8 6 8-6"/>',
+  layers: '<path class="f" d="M12 3.500 21 8l-9 4.500L3 8z"/><path d="M12 3.500 21 8l-9 4.500L3 8zM3 12l9 4.500 9-4.500M3 16l9 4.500 9-4.500"/>',
+  target: '<circle class="f" cx="12" cy="12" r="8.500"/><circle cx="12" cy="12" r="8.500"/><circle cx="12" cy="12" r="4.500"/><circle cx="12" cy="12" r="1"/>',
+  replyall: '<path d="m8 8.500-4.500 4 4.500 4M13 8.500l-4.500 4 4.500 4M8.500 12.500H15a5.500 5.500 0 0 1 5.500 5.500"/>', fwd: '<path d="m15 7.500 5 5-5 5M20 12.500H10a6 6 0 0 0-6 6"/>', reply: '<path d="m9 7.500-5 5 5 5M4 12.500h10a6 6 0 0 1 6 6"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.500-4M4 4v3.500h3.500M4 13a8 8 0 0 0 14.500 4M20 20v-3.500h-3.500"/>', trash: '<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l.8 12a2 2 0 0 0 2 1.900h5.400a2 2 0 0 0 2-1.900L17.500 7"/>',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
@@ -152,8 +156,20 @@ const view = () => $('#view');
 function paint(html, { tabs = true, fab = false } = {}) {
   const v = view(); v.className = S.animate ? 'enter' : ''; v.innerHTML = html;
   $('#tabbar').hidden = !tabs; $('#fab').hidden = !fab;
-  S.animate = false;
+  countUp(v, S.animate); S.animate = false;
 }
+// liczby „odliczają” do wartości (kwoty, liczniki na kaflach); bez animacji przy ograniczonym ruchu
+const fmtN = (n, f) => (f === 'zl' ? `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł` : String(Math.round(n)));
+function countUp(root, anim) {
+  root.querySelectorAll('[data-count]').forEach((el) => {
+    const to = +el.dataset.count || 0, f = el.dataset.fmt;
+    if (!anim || reduced() || !to) { el.textContent = fmtN(to, f); return; }
+    const t0 = performance.now(), dur = 1100, d = +(el.dataset.delay || 0);
+    const step = (t) => { const k = Math.min(1, Math.max(0, (t - t0 - d) / dur)), e = 1 - Math.pow(1 - k, 3); el.textContent = fmtN(f === 'zl' ? Math.round(to * e * 100) / 100 : to * e, f); if (k < 1) requestAnimationFrame(step); };
+    el.textContent = fmtN(0, f); requestAnimationFrame(step);
+  });
+}
+const eimg = (n) => `<img class="eimg" src="img/e-${n}.webp" alt="" aria-hidden="true">`;
 const ringSvg = (cls) => `<svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="3"/><circle class="rg ${cls}" cx="26" cy="26" r="24" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="151" transform="rotate(-90 26 26)"/></svg>`;
 
 // znacznik skrzynki przy wiadomości (tylko gdy skrzynek jest więcej i nie filtrujemy po jednej)
@@ -265,18 +281,18 @@ function bulkHtml(m) {
 function emptyFolderHtml() {
   const f = S.filter;
   if (f === 'offers') return `<div class="empty"><div class="big ser">Brak ofert</div>Reklamy i newslettery trafiają tu same.</div>`;
-  if (f === 'spam') return `<div class="empty"><div class="big ser">Czysto</div>Spam i podejrzane wiadomości trafiają tu same.</div>`;
+  if (f === 'spam') return `<div class="empty">${eimg('gotowe')}<div class="big ser">Czysto</div>Spam i podejrzane wiadomości trafiają tu same.</div>`;
   if (f === 'trash') return `<div class="empty"><div class="big ser">Kosz jest pusty</div></div>`;
-  if (f === 'sent') return `<div class="empty"><div class="big ser">Brak wysłanych</div>Tu zobaczysz wiadomości wysłane z Twoich skrzynek.</div>`;
+  if (f === 'sent') return `<div class="empty">${eimg('wyslane')}<div class="big ser">Brak wysłanych</div>Tu zobaczysz wiadomości wysłane z Twoich skrzynek.</div>`;
   if (f === 'drafts') return `<div class="empty"><div class="big ser">Brak szkiców</div></div>`;
-  return `<div class="empty"><div class="big ser">Pusto</div>Brak wiadomości w tym widoku.</div>`;
+  return `<div class="empty">${eimg('pusto')}<div class="big ser">Pusto</div>Brak wiadomości w tym widoku.</div>`;
 }
 function emptyNoAccount() {
   return `<div class="empty gl" style="border-radius:28px;margin-top:16px;padding:30px 20px"><div class="big ser">Dodaj pierwszą skrzynkę</div>Poczta działa z Gmailem, iCloud, Outlookiem, WP, Onetem, O2 i każdą skrzynką z IMAP.<div class="actions" style="justify-content:center"><button class="btn pri" data-go="#/accounts">${ic('plus', 'i18')}Dodaj konto</button></div></div>`;
 }
 
 function casesHtml(all) {
-  if (!all.length) return `<div class="empty"><div class="big ser">Czysto</div>Brak nowych spraw. Poczta szuka terminów w każdej nowej wiadomości.</div>`;
+  if (!all.length) return `<div class="empty">${eimg('gotowe')}<div class="big ser">Czysto</div>Brak nowych spraw. Poczta szuka terminów w każdej nowej wiadomości.</div>`;
   const kinds = [['all', 'Wszystko'], ['event', 'Wydarzenia'], ['deadline', 'Terminy'], ['parcel', 'Paczki']], have = new Set(all.map((i) => i.kind)), f = S.ck && have.has(S.ck) ? S.ck : 'all';
   const items = f === 'all' ? all : all.filter((i) => i.kind === f);
   const filt = have.size > 1 ? `<div class="chips" role="group" aria-label="Rodzaj spraw">${kinds.filter((k) => k[0] === 'all' || have.has(k[0])).map((k) => `<button class="chip" data-ck="${k[0]}" aria-pressed="${f === k[0]}">${k[1]}${k[0] === 'all' ? '' : `<b class="cn mono">${all.filter((i) => i.kind === k[0]).length}</b>`}</button>`).join('')}</div>` : '';
@@ -286,20 +302,23 @@ function casesHtml(all) {
   return filt + ['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('');
 }
 function caseCard(it, i = 0) {
-  return `<div class="card gl" style="--i:${i}"><div class="k mono">${ic(KIND_ICON[it.kind], 'i14')}${KIND_LABEL[it.kind]}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>
+  return `<div class="card gl kd kd-${it.kind}" style="--i:${i}"><div class="k mono">${ic(KIND_ICON[it.kind], 'i14')}${KIND_LABEL[it.kind]}</div><div class="ti">${esc(it.title)}</div><div class="wh">${esc(whenText(it))}</div>
   <div class="actions"><button class="btn pri grow" data-cal="${it.id}">${ic('cal', 'i18')}Dodaj do Kalendarza</button><button class="btn" data-open="${it.mid ?? it.message_id}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button><button class="btn" data-dismiss="${it.id}" aria-label="To nie jest sprawa">${ic('x', 'i18')}</button></div></div>`;
 }
 
-const payRow = (it, i, overdue) => `<div class="card gl ${overdue ? 'od' : ''}" style="--i:${i}"><div class="k mono">${ic('coin', 'i14')}${overdue ? 'Po terminie' : 'Termin płatności'}</div><div class="ti">${esc(it.title.replace(/^Do zapłaty [^:]*:\s*/i, ''))}</div><div class="wh">${it.amount ? `<b class="amt">${esc(money(it))}</b> · ` : ''}${esc(whenText({ ...it, amount: null }).replace(/^Zapłać /, '').replace(/^dziś$/, 'dziś'))}</div>
+const payRow = (it, i, overdue) => `<div class="card gl kd kd-deadline ${overdue ? 'od' : ''}" style="--i:${i}"><div class="k mono">${ic('coin', 'i14')}${overdue ? 'Po terminie' : 'Termin płatności'}</div><div class="ti">${esc(it.title.replace(/^Do zapłaty [^:]*:\s*/i, ''))}</div><div class="wh">${it.amount ? `<b class="amt">${esc(money(it))}</b> · ` : ''}${esc(whenText({ ...it, amount: null }).replace(/^Zapłać /, '').replace(/^dziś$/, 'dziś'))}</div>
   <div class="actions"><button class="btn pri grow" data-paid="${it.id}">${ic('check', 'i18')}Opłacone</button><button class="btn" data-cal="${it.id}" aria-label="Dodaj do Kalendarza">${ic('cal', 'i18')}</button><button class="btn" data-open="${it.mid}" aria-label="Otwórz wiadomość">${ic('chev', 'i18')}</button></div></div>`;
 function payHtml(o) {
-  if (!o.open.length && !o.paid.length) return `<div class="empty"><div class="big ser">Brak płatności</div>Gdy w mailu pojawi się faktura lub rachunek z terminem, zobaczysz go tutaj.</div>`;
+  if (!o.open.length && !o.paid.length) return `<div class="empty">${eimg('gotowe')}<div class="big ser">Brak płatności</div>Gdy w mailu pojawi się faktura lub rachunek z terminem, zobaczysz go tutaj.</div>`;
   const today = new Date(); const ymd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
   const late = o.open.filter((i) => i.starts_at.slice(0, 10) < ymd), soon = o.open.filter((i) => i.starts_at.slice(0, 10) >= ymd && dayDiff(parseLocal(i.starts_at), today) < 8), later = o.open.filter((i) => dayDiff(parseLocal(i.starts_at), today) >= 8);
   const sum = (a) => a.reduce((t, i) => t + (i.amount || 0), 0), fmt = (n) => `${n.toLocaleString('pl-PL', { maximumFractionDigits: 2 })} zł`;
   let i = 1;
   const grp = (t, a, od) => a.length ? `<div class="sec">${t}${sum(a) ? ` · ${fmt(sum(a))}` : ''}</div>${a.map((x) => payRow(x, i++, od)).join('')}` : '';
-  return `<section class="hero gl pay" style="--i:0"><div style="display:flex;flex-direction:column;gap:6px"><span class="eyebrow mono">Do zapłaty</span><span class="t">${o.total ? fmt(o.total) : '0 zł'}</span><span class="s">${o.open.length} ${o.open.length === 1 ? 'płatność' : 'płatności'}${o.overdue ? ` · <b style="color:var(--er)">po terminie: ${o.overdue}${o.overdue_total ? ` (${fmt(o.overdue_total)})` : ''}</b>` : ''}${o.unknown ? ` · ${o.unknown} bez kwoty` : ''}</span></div></section>
+  const paidT = o.paid_total || 0, all = paidT + (o.total || 0), frac = all ? (o.total || 0) / all : 0, C = 578; // pierścień = ile jeszcze zostało do zapłaty w tym miesiącu
+  return `<section class="hero gl pay" style="--i:0"><div class="pring"><svg viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="92" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="9"/><circle class="pf" cx="100" cy="100" r="92" fill="none" stroke="url(#gR)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C - C * frac}" transform="rotate(-90 100 100)"/></svg>
+    <div class="pc"><span class="pl">Do zapłaty</span><span class="t" data-count="${o.total || 0}" data-fmt="zl">${o.total ? fmt(o.total) : '0 zł'}</span><span class="pn">${o.open.length} ${o.open.length === 1 ? 'płatność' : 'płatności'}</span></div></div>
+    <div class="ps">${paidT ? `Opłacone w tym miesiącu: <b>${fmt(paidT)}</b>` : 'W tym miesiącu nic jeszcze nie opłacono'}${o.overdue ? `<br><b style="color:var(--er)">Po terminie: ${o.overdue}${o.overdue_total ? ` (${fmt(o.overdue_total)})` : ''}</b>` : ''}${o.unknown ? `<br>${o.unknown} bez kwoty` : ''}</div></section>
   ${grp('Po terminie', late, true)}${grp('W tym tygodniu', soon)}${grp('Później', later)}
   ${o.paid.length ? `<div class="sec">Opłacone w tym miesiącu · ${fmt(o.paid_total)}</div>${o.paid.map((x) => `<div class="kv paid"><span>${esc(x.title)}</span><span>${x.amount ? esc(money(x)) : ''} <button class="link" data-unpaid="${x.id}">cofnij</button></span></div>`).join('')}` : ''}`;
 }
@@ -401,7 +420,7 @@ async function viewMessage(id) {
     ${html && m.images_blocked ? `<div class="fbanner gl"><div>Obrazki są wyłączone.</div><button class="btn" data-act="showimg" data-id="${m.id}">Pokaż obrazki</button></div>` : ''}
     ${html ? `<div class="mailhost"><div class="body ${risky ? 'dim' : ''}" id="ptext">${rich(m.body)}</div><div class="ldg mono" id="ldg">Wczytuję oryginał…</div><div class="mailwrap pend ${risky ? 'dim' : ''}" id="body"><iframe id="mf" class="mailframe" title="Treść wiadomości" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" scrolling="no"></iframe></div></div>`
       : `<div class="body ${risky ? 'dim' : ''}" id="body">${rich(m.body)}</div>`}
-    <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('send', 'i18')}Odpowiedz</button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">Odpowiedz wszystkim</button>` : ''}<button class="btn" data-cmp="forward">Przekaż dalej</button></div>
+    <div class="actions racts">${own ? '' : `<button class="btn" data-cmp="reply">${ic('reply', 'i18')}<span>Odpowiedz</span></button>`}${!own && (m.cc_addr || String(m.to_addr || '').includes(',')) ? `<button class="btn" data-cmp="replyall">${ic('replyall', 'i18')}<span>Odp. wszystkim</span></button>` : ''}<button class="btn" data-cmp="forward">${ic('fwd', 'i18')}<span>Przekaż dalej</span></button></div>
     ${own || risky ? '' : `<div class="qrow">${QUICK.map((q) => `<button class="chip" data-qr="${esc(q)}">${esc(q)}</button>`).join('')}<button class="chip" data-x2="ar-from">${ic('tag', 'i14')}Reguła dla nadawcy</button></div>`}
     ${m.thread?.length ? `<div class="sec">W tej rozmowie · ${m.thread.length + 1}</div><div class="thr">${m.thread.map((t) => `<button class="thi gl ${t.unread ? 'unread' : ''}" data-thr="${t.id}"><span class="mono">${t.cat === 'sent' ? 'Ty → ' + esc(toNames(String(t.to_addr || '').split(',')[0])) : esc(dispName(t.from_addr, t.from_name))} · ${fmtTime(t.date)}</span><span class="tsn">${esc(t.snippet || '')}</span></button>`).join('')}</div>` : ''}`, { tabs: false });
   S.cur = { m, items }; threadNav(m);
@@ -413,17 +432,31 @@ async function viewMessage(id) {
 }
 
 async function viewToday() {
-  const [t, fu] = await Promise.all([get('/api/today'), get('/api/followups').then((r) => r.items).catch(() => [])]); S.unread = t.unread; badge();
+  const [t, fu, pay] = await Promise.all([get('/api/today'), get('/api/followups').then((r) => r.items).catch(() => []), get('/api/obligations').catch(() => null)]); S.unread = t.unread; badge();
   const now = new Date(), h = now.getHours(), hello = h < 5 ? 'Dobranoc' : h < 12 ? 'Dzień dobry' : h < 18 ? 'Miłego popołudnia' : 'Dobry wieczór';
   const groups = {};
   for (const it of t.items) { const d = dayDiff(parseLocal(it.starts_at), now); const g = d <= 0 ? 'Dziś' : d === 1 ? 'Jutro' : d < 8 ? 'W tym tygodniu' : 'Później'; (groups[g] ||= []).push(it); }
-  let i = 2;
-  paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">${WDL[now.getDay()]} · ${now.getDate()} ${MON[now.getMonth()]}</span></div>
-    <h1 class="ser" style="margin:14px 8px 4px;font-size:52px;line-height:52px;letter-spacing:-.025em">${hello}.</h1>
-    <p style="margin:0 8px 6px;color:var(--ink2);font-size:16px;line-height:23px">${t.unread ? `<b style="color:var(--ink)">${t.unread}</b> nieprzeczytanych, ` : ''}${t.pending ? `<b style="color:var(--ink)">${t.pending}</b> spraw do ogarnięcia.` : 'żadnych spraw na horyzoncie.'}</p>
-    ${heroHtml(t)}
-    ${fu.length ? `<div class="sec">Bez odpowiedzi</div>${fu.slice(0, 5).map((f, k) => fuCard(f, k + 2)).join('')}` : ''}
-    ${['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('') || '<div class="empty"><div class="big ser">Spokojny dzień</div>Nic nie wymaga uwagi.</div>'}`, { fab: true });
+  const pend = t.items.filter((x) => x.status === 'new'), nk = (k) => pend.filter((x) => x.kind === k).length;
+  const evToday = pend.filter((x) => x.kind === 'event' && dayDiff(parseLocal(x.starts_at), now) <= 0).length;
+  const payN = pay ? pay.open.length : nk('deadline'), parcels = nk('parcel'), events = nk('event');
+  const pl = (n, a, b, c) => (n === 1 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? b : c);
+  const tile = (o, k) => `<button class="tile gl ${o.cls || ''}" style="--i:${k}" data-x2="${o.x2 || 'tile'}"${o.seg ? ` data-seg="${o.seg}"` : ''}${o.ck ? ` data-ck="${o.ck}"` : ''}${o.f ? ` data-f="${o.f}"` : ''} aria-label="${esc(o.label)}">
+    <img class="timg" src="img/t-${o.img}.webp" alt="" aria-hidden="true"><span class="tic">${ic(o.icon)}</span>
+    <span class="tt"><b>${o.title}</b><span class="tv"><i data-count="${o.n}" data-delay="${k * 90}">${o.n}</i> ${esc(o.sub)}</span></span>${o.chev ? ic('chev', 'i18 tch') : ''}</button>`;
+  const sub = (n) => (n ? `${n}` : '0');
+  let i = 7;
+  paint(`<div class="greet" style="--i:0"><span class="eyebrow mono">${WDL[now.getDay()]} · ${now.getDate()} ${MON[now.getMonth()]} ${now.getFullYear()}</span><h1 class="gh">${hello}.</h1></div>
+    <div class="tiles">
+      ${tile({ cls: 'wide', img: 'mail', icon: 'mail', title: 'Poczta', n: t.unread, sub: t.unread === 1 ? 'nowa' : pl(t.unread, 'nowa', 'nowe', 'nowych'), seg: 'msg', f: t.unread ? 'unread' : 'all', chev: 1, label: `Poczta: ${t.unread} nieprzeczytanych` }, 1)}
+      ${tile({ img: 'sprawy', icon: 'layers', title: 'Sprawy', n: pend.length, sub: pl(pend.length, 'aktywna', 'aktywne', 'aktywnych'), seg: 'cases', ck: 'all', label: `Sprawy: ${pend.length}` }, 2)}
+      ${tile({ img: 'platnosci', icon: 'coin', title: 'Płatności', n: payN, sub: 'do zapłaty', seg: 'pay', label: `Płatności: ${payN} do zapłaty` }, 3)}
+      ${tile({ img: 'paczki', icon: 'box', title: 'Paczki', n: parcels, sub: 'w drodze', seg: 'cases', ck: 'parcel', label: `Paczki: ${parcels} w drodze` }, 4)}
+      ${tile({ img: 'terminy', icon: 'cal', title: 'Terminy', n: evToday || events, sub: evToday ? 'dziś' : pl(events, 'nadchodzący', 'nadchodzące', 'nadchodzących'), seg: 'cases', ck: 'event', label: `Terminy: ${events}` }, 5)}
+    </div>
+    <button class="tile gl wide sum" style="--i:6" data-x2="plan" aria-label="Przegląd dnia"><img class="timg" src="img/t-przeglad.webp" alt="" aria-hidden="true"><span class="tic">${ic('target')}</span><span class="tt"><b>Przegląd dnia</b><span class="tg mono"><span>Wiadomości: ${sub(t.unread)}</span><span>Sprawy: ${sub(pend.length)}</span><span>Płatności: ${sub(payN)}</span><span>Paczki: ${sub(parcels)}</span></span></span>${ic('chev', 'i18 tch')}</button>
+    <div id="plan"></div>
+    ${fu.length ? `<div class="sec">Bez odpowiedzi</div>${fu.slice(0, 5).map((f) => fuCard(f, i++)).join('')}` : ''}
+    ${['Dziś', 'Jutro', 'W tym tygodniu', 'Później'].filter((g) => groups[g]).map((g) => `<div class="sec">${g}</div>${groups[g].map((it) => caseCard(it, i++)).join('')}`).join('') || `<div class="empty">${eimg('gotowe')}<div class="big ser">Spokojny dzień</div>Nic nie wymaga uwagi.</div>`}`, { fab: true });
   nav('today');
 }
 
@@ -450,13 +483,13 @@ async function viewSearch() {
       const r = await get(`/api/attachments?q=${encodeURIComponent(v)}&kind=${S.sk || ''}`).catch(() => null); if (!r || my !== seq) return;
       $('#res').innerHTML = r.items.length ? r.items.map(aRow).join('') : `<div class="empty"><div class="big ser">Brak załączników</div>${v || S.sk ? 'Spróbuj innego pliku lub filtra.' : 'Pliki z wiadomości pojawią się tutaj.'}</div>`; return;
     }
-    if (!v) { $('#res').innerHTML = `<div class="empty"><div class="big ser">Wpisz coś</div>Szukam w tematach, nadawcach i treści, także bez polskich znaków.<br><span style="font-size:13px">Operatory: <b>od:</b>ola <b>do:</b>ola <b>ma:</b>załącznik <b>jest:</b>nieprzeczytane <b>w:</b>wysłane</span></div>`; return; }
+    if (!v) { $('#res').innerHTML = `<div class="empty">${eimg('szukaj')}<div class="big ser">Wpisz coś</div>Szukam w tematach, nadawcach i treści, także bez polskich znaków.<br><span style="font-size:13px">Operatory: <b>od:</b>ola <b>do:</b>ola <b>ma:</b>załącznik <b>jest:</b>nieprzeczytane <b>w:</b>wysłane</span></div>`; return; }
     if (v.length < 2 && !/:/.test(v)) return;
     const r = await get('/api/search?q=' + encodeURIComponent(v)).catch(() => null); if (!r || my !== seq) return;
     const termsOf = r.terms || [], plainJs = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l');
     const mark = (raw) => { const low = plainJs(raw); if (low.length !== raw.length || !termsOf.length) return esc(raw); const hot = new Array(raw.length).fill(false); for (const t of termsOf) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + 1)) for (let k = i; k < i + t.length; k++) hot[k] = true; let o = '', on = false; for (let k = 0; k < raw.length; k++) { if (hot[k] !== on) { o += on ? '</mark>' : '<mark>'; on = hot[k]; } o += esc(raw[k]); } return o + (on ? '</mark>' : ''); };
     window.__sm = (m) => { let h = msgRow(m); h = h.replace(/(<div class="sj">)([\s\S]*?)(<\/div>)/, (x, p, inner, q) => p + mark(m.subject || '') + q); if (m.hit) h = h.replace(/(<div class="sj">[\s\S]*?<\/div>)/, (mm) => mm + `<div class="hit">${esc(m.hit).replace(/\u0001/g, '<mark>').replace(/\u0002/g, '</mark>')}</div>`); return h; };
-    $('#res').innerHTML = (r.messages.length ? r.messages.map(window.__sm).join('') : `<div class="empty"><div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`)
+    $('#res').innerHTML = (r.messages.length ? r.messages.map(window.__sm).join('') : `<div class="empty">${eimg('szukaj')}<div class="big ser">Nic nie znaleziono</div>Spróbuj innego słowa.</div>`)
       + (!saved.some((x) => x.query === v) ? `<button class="lnk" type="button" id="ssave" style="margin:12px 8px 0">+ Zapisz to wyszukiwanie</button>` : '');
   };
   q.oninput = () => { clearTimeout(t); t = setTimeout(run, 180); };
@@ -477,7 +510,9 @@ async function viewSearch() {
 
 async function viewAccounts() {
   await loadAccounts();
+  const th = document.documentElement.classList.contains('gold') ? 'gold' : 'noc';
   paint(`<div class="top"><span class="eyebrow mono" style="padding-left:8px">Konta i prywatność</span></div>
+    <div class="sec">Wygląd</div><div class="themes"><button class="thm gl" data-x2="theme" data-t="gold" aria-pressed="${th === 'gold'}"><span class="sw-g"></span><b>Złoto</b><small>czerń i złoto</small></button><button class="thm gl" data-x2="theme" data-t="noc" aria-pressed="${th === 'noc'}"><span class="sw-n"></span><b>Noc</b><small>granat i błękit</small></button></div>
     ${S.accounts.map((a) => `<div class="acc gl"><span class="dot ${a.status === 'error' ? 'er' : ''}"></span><div class="w"><div class="n">${esc(a.label)}</div><div class="s">${esc(a.email)} · ${a.count} wiad. · ${a.status === 'error' ? esc(a.last_error || 'błąd') : ago(a.last_sync)}</div></div><button class="round gl" data-bell="${a.id}" data-on="${a.notify ? 1 : 0}" aria-pressed="${a.notify}" aria-label="Powiadomienia z ${esc(a.label)}" style="${a.notify ? '' : 'opacity:.55'}">${ic(a.notify ? 'bell' : 'bellOff', 'i18')}</button><button class="round gl" data-sync="${a.id}" aria-label="Synchronizuj ${esc(a.label)}">${ic('refresh', 'i18')}</button><button class="round gl" data-rm="${a.id}" aria-label="Usuń konto ${esc(a.label)}">${ic('trash', 'i18')}</button></div>`).join('') || '<div class="empty">Nie masz jeszcze żadnej skrzynki.</div>'}
     <div class="actions" style="margin-top:14px"><button class="btn pri grow" data-act="addacc">${ic('plus', 'i18')}Dodaj skrzynkę</button>${S.demoAllowed && !S.accounts.some((a) => a.provider === 'demo') ? '<button class="btn" data-act="demo">Tryb demo</button>' : ''}</div>
     <div class="sec">Logowanie kluczem dostępu</div><div id="pkcard" class="card gl" style="margin-top:6px"></div>
@@ -520,7 +555,7 @@ function attHtml(m) {
 
 function viewAuth() {
   const jm = location.hash.match(/^#\/join\/([\w-]+)/), join = jm && jm[1], setup = !join && S.setupNeeded;
-  paint(`<div class="auth"><h1 class="ser">${setup || join ? 'Witaj w <i>Poczcie</i>' : 'Poczta'}</h1><p style="color:var(--ink2);margin:0 0 18px;font-size:16px;line-height:23px">${join ? 'Dostałaś zaproszenie. Załóż własne konto: Twoja poczta będzie widoczna tylko dla Ciebie.' : setup ? 'Załóż konto właściciela. To hasło chroni dostęp do Twojej poczty.' : 'Zaloguj się, aby wejść do skrzynki.'}</p>
+  paint(`<div class="auth"><div class="brand"><span class="logo"><img src="img/logo.webp" alt=""></span><div class="wm"><span class="wmt">Poczta</span><span class="wms">Twoje centrum komunikacji</span></div></div><h1 class="ser">${setup || join ? 'Witaj w <i>Poczcie</i>' : 'Poczta'}</h1><p style="color:var(--ink2);margin:0 0 18px;font-size:16px;line-height:23px">${join ? 'Dostałaś zaproszenie. Załóż własne konto: Twoja poczta będzie widoczna tylko dla Ciebie.' : setup ? 'Załóż konto właściciela. To hasło chroni dostęp do Twojej poczty.' : 'Zaloguj się, aby wejść do skrzynki.'}</p>
   <form id="auth" class="gl" style="border-radius:28px;padding:8px 18px 18px"><div class="fld"><label for="e">E-mail</label><input class="in" id="e" type="email" autocomplete="username" required autocapitalize="off"></div><div class="fld"><label for="p">Hasło${setup || join ? ' (min. 10 znaków)' : ''}</label><input class="in" id="p" type="password" autocomplete="${setup || join ? 'new-password' : 'current-password'}" required minlength="${setup || join ? 10 : 1}"></div>${setup ? '<div class="fld"><label for="c">Kod instalacji</label><input class="in" id="c" autocomplete="off" placeholder="z instalatora serwera"></div>' : ''}<div class="err" id="err" role="alert"></div><button class="btn pri" style="width:100%;margin-top:14px" type="submit">${setup || join ? 'Utwórz konto' : 'Zaloguj'}</button></form>${join ? '<p style="color:var(--ink2);font-size:13px;line-height:19px;margin:14px 6px 0">To hasło dotyczy tylko Poczty, nie Twojej skrzynki. Skrzynkę dodasz za chwilę.</p>' : ''}${window.PublicKeyCredential && !setup && !join ? `<button type="button" class="btn" data-x2="pk-login" style="width:100%;margin-top:12px">${ic('shield', 'i18')}Zaloguj kluczem dostępu</button>` : ''}<div id="gbtn" style="margin-top:12px;display:flex;justify-content:center"></div></div>`, { tabs: false });
   if (!setup && !join) get('/api/auth-config').then((c) => {
     if (!c.google || !$('#gbtn')) return;
@@ -1140,6 +1175,9 @@ async function x2(a, el) {
   else if (a === 'wd-off') { await post('/api/widget/token', { off: true }); renderTools(); }
   else if (a === 'wd-copy') { try { await navigator.clipboard.writeText(S.wdScript); toast('Skopiowano skrypt'); } catch { toast('Nie udało się skopiować'); } }
   else if (a === 'bk-run') { el.disabled = true; try { await post('/api/backup/run'); toast('Kopia gotowa'); } catch (e) { toast(e.message); } renderTools(); }
+  else if (a === 'theme') { const g = d.t === 'gold'; document.documentElement.classList.toggle('gold', g); try { localStorage.setItem('poczta.theme', g ? 'gold' : 'noc'); } catch {} $('meta[name="theme-color"]')?.setAttribute('content', g ? '#080706' : '#05070D'); S.animate = true; route(); }
+  else if (a === 'tile') { S.seg = d.seg || 'msg'; if (d.ck) S.ck = d.ck; if (d.f) S.filter = d.f; S.animate = true; go('#/'); }
+  else if (a === 'plan') $('#plan')?.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' });
   else if (a === 'selmode') selMode(!document.body.classList.contains('selmode'));
   else if (a === 'sel-act') await selAct(d.a);
   else if (a === 'tn') { const n = S.tn?.all[S.tn.i + +d.d]; if (n) { S.tnDir = +d.d; go(`#/m/${n.id}`); } }
